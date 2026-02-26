@@ -170,6 +170,7 @@
         <button class="btn btn-secondary" id="exportBtn">Export Data</button>
         <!-- Button to export data to a text file for LLM analysis -->
         <button class="btn btn-secondary" id="exportTextBtn">Export Text</button>
+        <button class="btn btn-secondary" id="syncBtn">Refresh Data</button>
         <label id="importBtn" class="btn btn-secondary">Import Data <input type="file" id="importFile" class="hidden" accept=".json"></label>
         <button class="btn btn-danger" id="resetBtn">Reset All Data</button>
         <!-- Authentication button -->
@@ -375,13 +376,7 @@
     };
 
     // --- Supabase Client & Config ---
-    // Define your Supabase project URL and anonymous key. These values come
-    // from your Supabase project settings. They enable the client to
-    // authenticate and access your database. Without these the
-    // authentication and data sync features will not work.
     const SUPABASE_URL = 'https://dxcvbuwjgswupqyijhav.supabase.co';
-    // Supabase anon public key provided by your project settings. Replace this
-    // value if you rotate your anon key in the future.
     const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR4Y3ZidXdqZ3N3dXBxeWlqaGF2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUyMDgzODMsImV4cCI6MjA3MDc4NDM4M30.fAocl5EEjrqLyY52n95TikqJYu1Injje-FlKtPR6Sjg';
     // Namespace for Supabase integration state
     const NXU_SB = {};
@@ -2713,6 +2708,22 @@
     window.alert = function(msg) {
       window.showToast(msg, 'info');
     };
+
+    // Add Sync Button Listener
+    const syncBtn = document.getElementById('syncBtn');
+    if (syncBtn) {
+        syncBtn.onclick = () => syncDataFromCloud(false);
+    }
+
+    // Optional: Auto-sync on page load if logged in
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => {
+            const client = getSupabaseClient();
+            if (client && client.auth.getUser()) {
+                syncDataFromCloud(true);
+            }
+        }, 1000);
+    });
   </script>
 </body>
 </html>

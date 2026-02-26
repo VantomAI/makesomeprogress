@@ -874,6 +874,12 @@
                 state = data.data;
                 saveState();
                 renderAll();
+                // Show success message for both auto-sync and manual refresh
+                if (isAutoSync) {
+                    window.showToast('Data synced from cloud.', 'success');
+                } else {
+                    window.showToast('Data refreshed successfully.', 'success');
+                }
             } else if (!isAutoSync) {
                 alert('No data found in cloud.');
             }

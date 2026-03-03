@@ -15,21 +15,21 @@ function renderMobileBudget() {
     }
 
     const totalSpent = currentCheck.items.reduce((sum, item) => sum + item.cost, 0);
-    const totalBudget = state.monthlyNet || 0; // Use monthlyNet or default
-    const remaining = totalBudget - totalSpent;
+    const checkAmount = currentCheck.checkAmount || 0;
+    const remaining = checkAmount - totalSpent;
 
     summaryDiv.innerHTML = `
         <h2 class="text-lg font-semibold mb-4 text-center">Check Period: <span class="text-blue-400">${currentCheck.startDate}</span> to <span class="text-blue-400">${currentCheck.endDate}</span></h2>
         <div class="flex justify-between items-center mb-2 text-lg">
-            <span class="text-slate-300">Total Budget:</span>
-            <span class="font-mono text-white">$${totalBudget.toFixed(2)}</span>
+            <span class="text-slate-300">Check Amount:</span>
+            <span class="font-mono text-white">$${checkAmount.toFixed(2)}</span>
         </div>
         <div class="flex justify-between items-center mb-2 text-lg">
-            <span class="text-slate-300">Total Spent:</span>
+            <span class="text-slate-300">Total Spending:</span>
             <span class="font-mono text-red-400">$${totalSpent.toFixed(2)}</span>
         </div>
         <div class="flex justify-between items-center mt-4 pt-2 border-t border-slate-700 text-xl font-bold">
-            <span>Remaining:</span>
+            <span>Projected Balance:</span>
             <span class="font-mono text-green-400">$${remaining.toFixed(2)}</span>
         </div>
     `;

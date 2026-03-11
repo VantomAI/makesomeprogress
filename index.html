@@ -2734,12 +2734,20 @@
         syncBtn.onclick = () => syncDataFromCloud(false);
     }
 
-    // Optional: Auto-sync on page load if logged in
+    // Optional: Auto-sync on page load only when no local state exists.
+    // This avoids overwriting fresh local edits with older cloud data.
     document.addEventListener('DOMContentLoaded', () => {
-        setTimeout(() => {
+        setTimeout(async () => {
             const client = getSupabaseClient();
-            if (client && client.auth.getUser()) {
-                syncDataFromCloud(true);
+            if (!client) return;
+            try {
+                const { data: userData, error } = await client.auth.getUser();
+                const hasLocalState = !!localStorage.getItem(STORAGE_KEY);
+                if (!error && userData && userData.user && !hasLocalState) {
+                    await syncDataFromCloud(true);
+                }
+            } catch (err) {
+                console.warn('Auto-sync skipped:', err);
             }
         }, 1000);
     });

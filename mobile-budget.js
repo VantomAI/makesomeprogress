@@ -2,24 +2,45 @@
 function renderMobileBudget() {
     const summaryDiv = document.getElementById('mobile-summary');
     const expenseListDiv = document.getElementById('mobile-expense-list');
-    
-    if (!state || !state.checkTracker || !state.checkTracker.checkLogs || state.checkTracker.checkLogs.length === 0) {
+
+    // Only run when the mobile tab markup exists.
+    if (!summaryDiv || !expenseListDiv) return;
+
+    if (!state || !state.checkTracker || !Array.isArray(state.checkTracker.checkLogs) || state.checkTracker.checkLogs.length === 0) {
         summaryDiv.innerHTML = '<p class="text-slate-400">No budget data available yet. Please add a check log.</p>';
+        expenseListDiv.innerHTML = '';
         return;
     }
 
-    const today = new Date().toISOString().split("T")[0];
-    let currentCheck = state.checkTracker.checkLogs.find(c => today >= c.startDate && today <= c.endDate);
-    if (!currentCheck) {
-        currentCheck = state.checkTracker.checkLogs.reduce((latest, current) => new Date(current.endDate) > new Date(latest.endDate) ? current : latest);
+    const logs = state.checkTracker.checkLogs.filter(Boolean);
+    if (logs.length === 0) {
+        summaryDiv.innerHTML = '<p class="text-slate-400">No budget data available yet. Please add a check log.</p>';
+        expenseListDiv.innerHTML = '';
+        return;
     }
 
-    const totalSpent = currentCheck.items.reduce((sum, item) => sum + item.cost, 0);
-    const checkAmount = currentCheck.checkAmount || 0;
+    const today = new Date().toISOString().split('T')[0];
+    let currentCheck = logs.find(c => c && c.startDate && c.endDate && today >= c.startDate && today <= c.endDate);
+    if (!currentCheck) {
+        currentCheck = logs.reduce((latest, current) => {
+            if (!latest) return current;
+            return new Date(current.endDate || 0) > new Date(latest.endDate || 0) ? current : latest;
+        }, null);
+    }
+
+    if (!currentCheck) {
+        summaryDiv.innerHTML = '<p class="text-slate-400">No budget data available yet. Please add a check log.</p>';
+        expenseListDiv.innerHTML = '';
+        return;
+    }
+
+    const items = Array.isArray(currentCheck.items) ? currentCheck.items : [];
+    const totalSpent = items.reduce((sum, item) => sum + (Number(item?.cost) || 0), 0);
+    const checkAmount = Number(currentCheck.checkAmount) || 0;
     const remaining = checkAmount - totalSpent;
 
     summaryDiv.innerHTML = `
-        <h2 class="text-lg font-semibold mb-4 text-center">Check Period: <span class="text-blue-400">${currentCheck.startDate}</span> to <span class="text-blue-400">${currentCheck.endDate}</span></h2>
+        <h2 class="text-lg font-semibold mb-4 text-center">Check Period: <span class="text-blue-400">${currentCheck.startDate || 'N/A'}</span> to <span class="text-blue-400">${currentCheck.endDate || 'N/A'}</span></h2>
         <div class="flex justify-between items-center mb-2 text-lg">
             <span class="text-slate-300">Check Amount:</span>
             <span class="font-mono text-white">$${checkAmount.toFixed(2)}</span>
@@ -35,14 +56,14 @@ function renderMobileBudget() {
     `;
 
     expenseListDiv.innerHTML = '';
-    const sortedItems = [...currentCheck.items].sort((a, b) => new Date(b.dueDate) - new Date(a.dueDate));
-    
+    const sortedItems = [...items].sort((a, b) => new Date(b?.dueDate || 0) - new Date(a?.dueDate || 0));
+
     for (const item of sortedItems) {
         const itemDiv = document.createElement('div');
         itemDiv.className = 'flex justify-between items-center py-3 border-b border-slate-800 last:border-0';
         itemDiv.innerHTML = `
-            <span class="font-medium">${item.bill}</span>
-            <span class="font-mono text-slate-300">$${item.cost.toFixed(2)}</span>
+            <span class="font-medium">${item?.bill || 'Unnamed bill'}</span>
+            <span class="font-mono text-slate-300">$${(Number(item?.cost) || 0).toFixed(2)}</span>
         `;
         expenseListDiv.appendChild(itemDiv);
     }
@@ -56,6 +77,5 @@ renderAll = function() {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Initialize once
     setTimeout(renderMobileBudget, 1000);
 });

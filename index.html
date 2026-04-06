@@ -2421,7 +2421,7 @@
       if (state.appStates) {
         delete state.appStates.googleCalendarToken;
         delete state.appStates.lastCalSync;
-        delete state.appStates.makeSomeProgressCalendarId;
+        // Preserve makeSomeProgressCalendarId so reconnecting doesn't require re-finding the calendar
       }
       saveState();
       saveDataToCloud();
@@ -2477,6 +2477,8 @@
       return resp;
     }
 
+    const FALLBACK_MSP_CALENDAR_ID = '760ae8031827f680e7e6ae4ec9f88c06dbf6278012bc70e85305b65376d1bdff@group.calendar.google.com';
+
     async function findOrCreateMSPCalendar() {
       // Check if we already have the calendar ID cached
       if (state.appStates?.makeSomeProgressCalendarId) {
@@ -2484,34 +2486,57 @@
         try {
           const resp = await gcalFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(state.appStates.makeSomeProgressCalendarId)}`);
           if (resp.ok) return state.appStates.makeSomeProgressCalendarId;
+          console.warn('[GCal] Cached calendar ID returned status', resp.status);
         } catch (e) { if (e.message === 'TOKEN_EXPIRED') throw e; }
         // Cached ID invalid, clear it
         delete state.appStates.makeSomeProgressCalendarId;
       }
 
       // Search existing calendars
-      const listResp = await gcalFetch('https://www.googleapis.com/calendar/v3/users/me/calendarList');
-      if (!listResp.ok) throw new Error('Failed to list calendars');
-      const listData = await listResp.json();
-      const existing = (listData.items || []).find(c => c.summary === 'MakeSomeProgress');
-      if (existing) {
-        if (!state.appStates) state.appStates = {};
-        state.appStates.makeSomeProgressCalendarId = existing.id;
-        saveState();
-        return existing.id;
+      try {
+        const listResp = await gcalFetch('https://www.googleapis.com/calendar/v3/users/me/calendarList');
+        if (listResp.ok) {
+          const listData = await listResp.json();
+          const existing = (listData.items || []).find(c => c.summary === 'MakeSomeProgress');
+          if (existing) {
+            if (!state.appStates) state.appStates = {};
+            state.appStates.makeSomeProgressCalendarId = existing.id;
+            saveState();
+            return existing.id;
+          }
+        } else {
+          console.warn('[GCal] List calendars failed with status', listResp.status);
+        }
+      } catch (e) {
+        if (e.message === 'TOKEN_EXPIRED') throw e;
+        console.warn('[GCal] Error listing calendars:', e.message);
       }
 
-      // Create new calendar
-      const createResp = await gcalFetch('https://www.googleapis.com/calendar/v3/calendars', {
-        method: 'POST',
-        body: JSON.stringify({ summary: 'MakeSomeProgress', timeZone: 'America/Chicago' })
-      });
-      if (!createResp.ok) throw new Error('Failed to create MakeSomeProgress calendar');
-      const created = await createResp.json();
+      // Try to create new calendar
+      try {
+        const createResp = await gcalFetch('https://www.googleapis.com/calendar/v3/calendars', {
+          method: 'POST',
+          body: JSON.stringify({ summary: 'MakeSomeProgress', timeZone: 'America/Chicago' })
+        });
+        if (createResp.ok) {
+          const created = await createResp.json();
+          if (!state.appStates) state.appStates = {};
+          state.appStates.makeSomeProgressCalendarId = created.id;
+          saveState();
+          return created.id;
+        }
+        console.warn('[GCal] Create calendar failed with status', createResp.status);
+      } catch (e) {
+        if (e.message === 'TOKEN_EXPIRED') throw e;
+        console.warn('[GCal] Error creating calendar:', e.message);
+      }
+
+      // Fallback: use the known hardcoded calendar ID
+      console.info('[GCal] Using fallback MakeSomeProgress calendar ID');
       if (!state.appStates) state.appStates = {};
-      state.appStates.makeSomeProgressCalendarId = created.id;
+      state.appStates.makeSomeProgressCalendarId = FALLBACK_MSP_CALENDAR_ID;
       saveState();
-      return created.id;
+      return FALLBACK_MSP_CALENDAR_ID;
     }
 
     function getNextDueDateForward(bill) {
@@ -2584,7 +2609,8 @@
         calendarId = await findOrCreateMSPCalendar();
       } catch (e) {
         if (e.message === 'TOKEN_EXPIRED') return;
-        window.showToast('Failed to find or create MakeSomeProgress calendar.', 'error');
+        console.error('[GCal] findOrCreateMSPCalendar failed:', e);
+        window.showToast('Failed to find or create MakeSomeProgress calendar. Check console for details.', 'error');
         return;
       }
 
@@ -2620,11 +2646,24 @@
             bill.gcalEventId = created.id;
             synced++;
           } else {
-            if (resp.status === 401) return; // Already handled in gcalFetch
+            if (resp.status === 401) return;
+            const errBody = await resp.text().catch(() => '');
+            console.error(`[GCal] Event create failed for "${bill.name}": ${resp.status} ${errBody}`);
+            if (resp.status === 403) {
+              window.showToast('Permission denied — please disconnect and reconnect Google Calendar in Settings.', 'error');
+              return;
+            }
+            if (resp.status === 404) {
+              window.showToast('Calendar not found — clearing cached ID. Please try syncing again.', 'error');
+              delete state.appStates.makeSomeProgressCalendarId;
+              saveState();
+              return;
+            }
             failed++;
           }
         } catch (e) {
           if (e.message === 'TOKEN_EXPIRED') return;
+          console.error(`[GCal] Event sync error for "${bill.name}":`, e);
           failed++;
         }
       }

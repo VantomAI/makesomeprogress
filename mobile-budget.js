@@ -1,20 +1,19 @@
-// Read from existing state
+// Mobile Budget Tab Rendering
 function renderMobileBudget() {
     const summaryDiv = document.getElementById('mobile-summary');
     const expenseListDiv = document.getElementById('mobile-expense-list');
 
-    // Only run when the mobile tab markup exists.
     if (!summaryDiv || !expenseListDiv) return;
 
     if (!state || !state.checkTracker || !Array.isArray(state.checkTracker.checkLogs) || state.checkTracker.checkLogs.length === 0) {
-        summaryDiv.innerHTML = '<p class="text-slate-400">No budget data available yet. Please add a check log.</p>';
+        summaryDiv.innerHTML = '<p class="text-slate-500 text-sm">No budget data available yet. Please add a check log.</p>';
         expenseListDiv.innerHTML = '';
         return;
     }
 
     const logs = state.checkTracker.checkLogs.filter(Boolean);
     if (logs.length === 0) {
-        summaryDiv.innerHTML = '<p class="text-slate-400">No budget data available yet. Please add a check log.</p>';
+        summaryDiv.innerHTML = '<p class="text-slate-500 text-sm">No budget data available yet. Please add a check log.</p>';
         expenseListDiv.innerHTML = '';
         return;
     }
@@ -29,7 +28,7 @@ function renderMobileBudget() {
     }
 
     if (!currentCheck) {
-        summaryDiv.innerHTML = '<p class="text-slate-400">No budget data available yet. Please add a check log.</p>';
+        summaryDiv.innerHTML = '<p class="text-slate-500 text-sm">No budget data available yet. Please add a check log.</p>';
         expenseListDiv.innerHTML = '';
         return;
     }
@@ -38,20 +37,34 @@ function renderMobileBudget() {
     const totalSpent = items.reduce((sum, item) => sum + (Number(item?.cost) || 0), 0);
     const checkAmount = Number(currentCheck.checkAmount) || 0;
     const remaining = checkAmount - totalSpent;
+    const paidTotal = items.reduce((sum, item) => sum + (item?.paid ? (Number(item?.cost) || 0) : 0), 0);
+    const actualRemaining = checkAmount - paidTotal;
 
     summaryDiv.innerHTML = `
-        <h2 class="text-lg font-semibold mb-4 text-center">Check Period: <span class="text-blue-400">${currentCheck.startDate || 'N/A'}</span> to <span class="text-blue-400">${currentCheck.endDate || 'N/A'}</span></h2>
-        <div class="flex justify-between items-center mb-2 text-lg">
-            <span class="text-slate-300">Check Amount:</span>
-            <span class="font-mono text-white">$${checkAmount.toFixed(2)}</span>
-        </div>
-        <div class="flex justify-between items-center mb-2 text-lg">
-            <span class="text-slate-300">Total Spending:</span>
-            <span class="font-mono text-red-400">$${totalSpent.toFixed(2)}</span>
-        </div>
-        <div class="flex justify-between items-center mt-4 pt-2 border-t border-slate-700 text-xl font-bold">
-            <span>Projected Balance:</span>
-            <span class="font-mono text-green-400">$${remaining.toFixed(2)}</span>
+        <h2 class="text-sm font-medium mb-4 text-center text-slate-400">
+            ${currentCheck.startDate || 'N/A'} to ${currentCheck.endDate || 'N/A'}
+        </h2>
+        <div class="space-y-3">
+            <div class="flex justify-between items-center">
+                <span class="text-slate-400 text-sm">Check Amount</span>
+                <span class="font-mono text-white font-semibold">$${checkAmount.toFixed(2)}</span>
+            </div>
+            <div class="flex justify-between items-center">
+                <span class="text-slate-400 text-sm">Total Spending</span>
+                <span class="font-mono text-red-400 font-semibold">$${totalSpent.toFixed(2)}</span>
+            </div>
+            <div class="flex justify-between items-center">
+                <span class="text-slate-400 text-sm">Total Paid</span>
+                <span class="font-mono text-amber-400 font-semibold">$${paidTotal.toFixed(2)}</span>
+            </div>
+            <div class="flex justify-between items-center pt-3 border-t border-slate-700">
+                <span class="text-white font-semibold">Projected Balance</span>
+                <span class="font-mono text-lg font-bold ${remaining >= 0 ? 'text-emerald-400' : 'text-red-400'}">$${remaining.toFixed(2)}</span>
+            </div>
+            <div class="flex justify-between items-center">
+                <span class="text-white font-semibold">Actual Balance</span>
+                <span class="font-mono text-lg font-bold ${actualRemaining >= 0 ? 'text-emerald-400' : 'text-red-400'}">$${actualRemaining.toFixed(2)}</span>
+            </div>
         </div>
     `;
 
@@ -60,16 +73,19 @@ function renderMobileBudget() {
 
     for (const item of sortedItems) {
         const itemDiv = document.createElement('div');
-        itemDiv.className = 'flex justify-between items-center py-3 border-b border-slate-800 last:border-0';
+        itemDiv.className = `flex justify-between items-center py-3 border-b border-slate-800 last:border-0 ${item?.paid ? 'opacity-50' : ''}`;
         itemDiv.innerHTML = `
-            <span class="font-medium">${item?.bill || 'Unnamed bill'}</span>
-            <span class="font-mono text-slate-300">$${(Number(item?.cost) || 0).toFixed(2)}</span>
+            <div class="flex items-center gap-2">
+                ${item?.paid ? '<span class="w-2 h-2 rounded-full bg-emerald-500"></span>' : '<span class="w-2 h-2 rounded-full bg-slate-600"></span>'}
+                <span class="font-medium text-sm text-slate-300">${item?.bill || 'Unnamed bill'}</span>
+            </div>
+            <span class="font-mono text-sm text-slate-300">$${(Number(item?.cost) || 0).toFixed(2)}</span>
         `;
         expenseListDiv.appendChild(itemDiv);
     }
 }
 
-// Hook into the tab switching or renderAll to update this view
+// Hook into renderAll
 const originalRenderAll = renderAll;
 renderAll = function() {
     if (originalRenderAll) originalRenderAll();

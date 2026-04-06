@@ -2253,6 +2253,14 @@
       state = JSON.parse(JSON.stringify(DEFAULT_STATE));
       try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       saveState(); renderAll();
+      // Hide Google Calendar UI elements on logout
+      const settingsBtn = document.getElementById('settingsBtn');
+      const syncCalBtn = document.getElementById('syncCalendarBtn');
+      const calSyncStatus = document.getElementById('calSyncStatus');
+      if (settingsBtn) settingsBtn.style.display = 'none';
+      if (syncCalBtn) syncCalBtn.style.display = 'none';
+      if (calSyncStatus) calSyncStatus.style.display = 'none';
+      updateGoogleCalStatus();
     }
 
     let confirmCallback = null;
@@ -2289,6 +2297,15 @@
     }
 
     // ===================== GOOGLE CALENDAR SYNC =====================
+    async function isUserAuthenticated() {
+      const client = getSupabaseClient();
+      if (!client) return false;
+      try {
+        const { data: userData, error } = await client.auth.getUser();
+        return !error && !!userData?.user;
+      } catch (e) { return false; }
+    }
+
     const GOOGLE_CLIENT_ID = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_GOOGLE_CLIENT_ID) || window.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
 
     function isGoogleCalEnabled() {
@@ -2310,19 +2327,26 @@
       if (!state.appStates) state.appStates = {};
       state.appStates.googleCalendarToken = token;
       saveState();
+      saveDataToCloud();
     }
 
-    function initGoogleCalUI() {
+    async function initGoogleCalUI() {
       const settingsBtn = document.getElementById('settingsBtn');
       const syncCalBtn = document.getElementById('syncCalendarBtn');
       const calSyncStatus = document.getElementById('calSyncStatus');
 
+      const authed = await isUserAuthenticated();
+      if (!authed) {
+        if (settingsBtn) settingsBtn.style.display = 'none';
+        if (syncCalBtn) syncCalBtn.style.display = 'none';
+        if (calSyncStatus) calSyncStatus.style.display = 'none';
+        return;
+      }
+
       if (isGoogleCalEnabled()) {
         if (settingsBtn) settingsBtn.style.display = '';
-        if (syncCalBtn) syncCalBtn.style.display = '';
         updateGoogleCalStatus();
       } else {
-        // Always show settings gear but hide Google-specific features if no client ID
         if (settingsBtn) settingsBtn.style.display = '';
         const gcalSection = document.getElementById('googleCalSection');
         if (gcalSection) gcalSection.innerHTML = '<p class="text-xs text-slate-500">Google Calendar integration requires a NEXT_PUBLIC_GOOGLE_CLIENT_ID environment variable. Set it to enable this feature.</p>';
@@ -2357,7 +2381,8 @@
       }
     }
 
-    function showSettingsModal() {
+    async function showSettingsModal() {
+      if (!(await isUserAuthenticated())) return;
       updateGoogleCalStatus();
       const modal = document.getElementById('settingsModal');
       modal.classList.remove('hidden'); modal.classList.add('flex');
@@ -2368,7 +2393,8 @@
       document.getElementById('settingsModal').classList.remove('flex');
     }
 
-    function connectGoogleCalendar() {
+    async function connectGoogleCalendar() {
+      if (!(await isUserAuthenticated())) { window.showToast('Please log in to connect Google Calendar.', 'error'); return; }
       const clientId = getGoogleClientId();
       if (!clientId) { window.showToast('Google Client ID not configured.', 'error'); return; }
       const redirectUri = window.location.origin + window.location.pathname;
@@ -2377,19 +2403,24 @@
       window.location.href = authUrl;
     }
 
-    function disconnectGoogleCalendar() {
+    async function disconnectGoogleCalendar() {
       if (state.appStates) {
         delete state.appStates.googleCalendarToken;
         delete state.appStates.lastCalSync;
       }
       saveState();
+      saveDataToCloud();
       updateGoogleCalStatus();
       window.showToast('Google Calendar disconnected.', 'info');
     }
 
-    function handleOAuthCallback() {
+    async function handleOAuthCallback() {
       const hash = window.location.hash;
       if (hash.includes('access_token=')) {
+        if (!(await isUserAuthenticated())) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          return;
+        }
         const params = new URLSearchParams(hash.substring(1));
         const token = params.get('access_token');
         if (token) {
@@ -2415,6 +2446,7 @@
     }
 
     async function syncToGoogleCalendar() {
+      if (!(await isUserAuthenticated())) { window.showToast('Please log in to sync to Google Calendar.', 'error'); return; }
       const token = getGoogleCalToken();
       if (!token) { window.showToast('Please connect Google Calendar first.', 'error'); return; }
 
@@ -2467,6 +2499,7 @@
       if (!state.appStates) state.appStates = {};
       state.appStates.lastCalSync = new Date().toISOString();
       saveState();
+      saveDataToCloud();
       updateGoogleCalStatus();
       window.showToast(`Synced ${synced} expense(s) to Google Calendar.${failed > 0 ? ` ${failed} failed.` : ''}`, synced > 0 ? 'success' : 'error');
     }
@@ -2483,7 +2516,7 @@
     }
 
     // ===================== INIT =====================
-    function init() {
+    async function init() {
       // Template selector
       document.querySelector('.template-selector').innerHTML = Object.entries(templates).map(([key, { name, icon }]) => `
         <div class="template-card p-3 border border-slate-600 rounded-lg cursor-pointer hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-colors" data-template="${key}">
@@ -2601,7 +2634,7 @@
         try {
           const { error } = await client.auth.signInWithPassword({ email, password });
           if (error) { alert(error.message || 'Login failed.'); return; }
-          hideAuthModal(); await updateAuthUI(); await syncDataFromCloud(true);
+          hideAuthModal(); await updateAuthUI(); await syncDataFromCloud(true); await initGoogleCalUI();
         } catch (err) { alert('Login failed.'); }
       });
       document.getElementById('signupSubmitBtn')?.addEventListener('click', async () => {
@@ -2616,7 +2649,7 @@
           if (error) { alert(error.message || 'Account creation failed.'); return; }
           if (!data.session) { await client.auth.signInWithPassword({ email, password }); }
           try { const { data: u } = await client.auth.getUser(); if (u?.user) await client.from('profiles').upsert({ id: u.user.id, email, username: email }, { onConflict: 'id' }); } catch (e) {}
-          hideAuthModal(); await updateAuthUI(); await saveDataToCloud();
+          hideAuthModal(); await updateAuthUI(); await saveDataToCloud(); await initGoogleCalUI();
         } catch (err) { alert('Account creation failed.'); }
       });
       document.getElementById('saveToCloudBtn')?.addEventListener('click', saveDataToCloud);
@@ -2630,11 +2663,11 @@
       document.getElementById('syncCalendarBtn')?.addEventListener('click', syncToGoogleCalendar);
 
       // Load and render
-      updateAuthUI();
+      await updateAuthUI();
       loadState();
       runStartupChecks();
-      handleOAuthCallback();
-      initGoogleCalUI();
+      await handleOAuthCallback();
+      await initGoogleCalUI();
       renderAll();
       const initialTab = window.shouldDefaultToMobileView() ? 'mobile-budget-tab' : 'dashboard-tab';
       setActiveTab(initialTab);

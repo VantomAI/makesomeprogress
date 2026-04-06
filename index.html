@@ -2549,6 +2549,31 @@
       return nextDue;
     }
 
+    function getBillSyncInfo(bill) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // Format B: has valid firstDueDate AND recurrenceInterval
+      if (bill.firstDueDate && bill.firstDueDate !== '' && bill.recurrenceInterval) {
+        const nextDue = getNextDueDateForward(bill);
+        if (!nextDue) return null;
+        const rrule = getRecurrenceRule(bill.recurrenceInterval);
+        return { nextDueDate: nextDue, rrule };
+      }
+
+      // Format A: has dueDay (legacy) — treat as monthly
+      if (bill.dueDay) {
+        const day = parseInt(bill.dueDay);
+        let candidate = new Date(today.getFullYear(), today.getMonth(), day);
+        if (candidate < today) {
+          candidate = new Date(today.getFullYear(), today.getMonth() + 1, day);
+        }
+        return { nextDueDate: candidate, rrule: 'RRULE:FREQ=MONTHLY' };
+      }
+
+      return null;
+    }
+
     function formatDateYMD(date) {
       const y = date.getFullYear();
       const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -2575,16 +2600,16 @@
       if (!bill.gcalEventId || !getGoogleCalToken()) return;
       const calId = state.appStates?.makeSomeProgressCalendarId;
       if (!calId) return;
-      const nextDue = getNextDueDateForward(bill);
-      if (!nextDue) return;
-      const dateStr = formatDateYMD(nextDue);
+      const syncInfo = getBillSyncInfo(bill);
+      if (!syncInfo) return;
+      const dateStr = formatDateYMD(syncInfo.nextDueDate);
       const intervalLabel = RECURRENCE_INTERVALS.find(i => i.value === bill.recurrenceInterval)?.label || bill.recurrenceInterval || 'Monthly';
       const event = {
         summary: `${bill.name} — ${formatCurrency(bill.amount)}`,
         description: `Category: ${bill.category || 'Other'} | Recurring: ${intervalLabel} | Managed by MakeSomeProgress`,
         start: { date: dateStr, timeZone: 'America/Chicago' },
-        end: { date: getEndDate(nextDue), timeZone: 'America/Chicago' },
-        recurrence: [getRecurrenceRule(bill.recurrenceInterval || 'monthly')],
+        end: { date: getEndDate(syncInfo.nextDueDate), timeZone: 'America/Chicago' },
+        recurrence: [syncInfo.rrule],
         extendedProperties: { private: { source: 'makesomeprogress', billId: String(bill.id || bill.name) } },
         colorId: '11'
       };
@@ -2617,21 +2642,24 @@
       let synced = 0, skipped = 0, failed = 0;
       for (const bill of bills) {
         try {
+          // Skip $0 bills (card payment placeholders)
+          if (bill.amount === 0) continue;
+
           // Skip bills that already have a GCal event
           if (bill.gcalEventId) { skipped++; continue; }
 
-          const nextDue = getNextDueDateForward(bill);
-          if (!nextDue) continue;
+          const syncInfo = getBillSyncInfo(bill);
+          if (!syncInfo) continue;
 
-          const dateStr = formatDateYMD(nextDue);
+          const dateStr = formatDateYMD(syncInfo.nextDueDate);
           const intervalLabel = RECURRENCE_INTERVALS.find(i => i.value === bill.recurrenceInterval)?.label || bill.recurrenceInterval || 'Monthly';
 
           const event = {
             summary: `${bill.name} — ${formatCurrency(bill.amount)}`,
             description: `Category: ${bill.category || 'Other'} | Recurring: ${intervalLabel} | Managed by MakeSomeProgress`,
             start: { date: dateStr, timeZone: 'America/Chicago' },
-            end: { date: getEndDate(nextDue), timeZone: 'America/Chicago' },
-            recurrence: [getRecurrenceRule(bill.recurrenceInterval || 'monthly')],
+            end: { date: getEndDate(syncInfo.nextDueDate), timeZone: 'America/Chicago' },
+            recurrence: [syncInfo.rrule],
             extendedProperties: { private: { source: 'makesomeprogress', billId: String(bill.id || bill.name) } },
             colorId: '11'
           };
@@ -2644,6 +2672,7 @@
           if (resp.ok) {
             const created = await resp.json();
             bill.gcalEventId = created.id;
+            console.log('Created GCal event for:', bill.name);
             synced++;
           } else {
             if (resp.status === 401) return;

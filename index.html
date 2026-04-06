@@ -355,14 +355,16 @@
         <div class="mb-6">
           <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-3">
             <h3 class="text-lg font-semibold text-white">Spending Analytics</h3>
-            <div class="flex gap-2 flex-wrap">
+            <div class="flex gap-2 flex-wrap items-center">
               <select id="historyTimePeriod" class="text-xs w-36">
                 <option value="thisMonth">This Month</option>
                 <option value="last3">Last 3 Months</option>
                 <option value="last6" selected>Last 6 Months</option>
                 <option value="last12">Last 12 Months</option>
+                <option value="byYear">By Year</option>
                 <option value="all">All Time</option>
               </select>
+              <select id="historyYearSelect" class="text-xs w-24 hidden"></select>
             </div>
           </div>
 
@@ -379,6 +381,12 @@
               <h4 class="text-sm font-semibold text-slate-300 mb-3">Monthly Spending Trend</h4>
               <div class="chart-container"><canvas id="trendChart"></canvas></div>
             </div>
+          </div>
+
+          <!-- Year-over-Year Chart (shown for All Time) -->
+          <div id="yoyChartContainer" class="card p-5 mb-4 hidden">
+            <h4 class="text-sm font-semibold text-slate-300 mb-3">Year-over-Year Spending</h4>
+            <div class="chart-container"><canvas id="yoyChart"></canvas></div>
           </div>
 
           <!-- Category Breakdown Table -->
@@ -610,7 +618,7 @@
         const dueDay = bill.dueDay || 1;
         const thisMonthDue = new Date(today.getFullYear(), today.getMonth(), dueDay);
         const diffDays = Math.ceil((thisMonthDue - today) / (1000 * 60 * 60 * 24));
-        if (diffDays < 0) return { status: 'overdue', text: 'Overdue', nextDue: thisMonthDue };
+        if (diffDays < 0) return { status: 'overdue', text: 'Due', nextDue: thisMonthDue };
         if (diffDays <= 7) return { status: 'due-soon', text: 'Due Soon', nextDue: thisMonthDue };
         return { status: 'upcoming', text: 'Upcoming', nextDue: thisMonthDue };
       }
@@ -633,7 +641,7 @@
         }
       }
 
-      if (diffDays < 0) return { status: 'overdue', text: 'Overdue', nextDue };
+      if (diffDays < 0) return { status: 'overdue', text: 'Due', nextDue };
       if (diffDays <= 7) return { status: 'due-soon', text: 'Due Soon', nextDue };
       return { status: 'upcoming', text: 'Upcoming', nextDue };
     }
@@ -1175,10 +1183,18 @@
     function toggleLayoutDropdown(rowId) { document.querySelectorAll('.layout-dropdown').forEach(d => { if (d.id !== `layout-dropdown-${rowId}`) d.classList.add('hidden'); }); document.getElementById(`layout-dropdown-${rowId}`).classList.toggle('hidden'); }
 
     // ===================== DRAG AND DROP =====================
+    let _rowDragController = null;
+    let _listDragController = null;
+
     function initListItemDragAndDrop() {
+      // Abort previous listeners to prevent duplicates
+      if (_listDragController) _listDragController.abort();
+      _listDragController = new AbortController();
+      const signal = _listDragController.signal;
+
       document.querySelectorAll('.list-item-draggable').forEach(d => {
-        d.addEventListener('dragstart', () => d.classList.add('item-dragging'));
-        d.addEventListener('dragend', () => d.classList.remove('item-dragging'));
+        d.addEventListener('dragstart', () => d.classList.add('item-dragging'), { signal });
+        d.addEventListener('dragend', () => d.classList.remove('item-dragging'), { signal });
       });
       document.querySelectorAll('.list-container').forEach(container => {
         container.addEventListener('dragover', e => {
@@ -1188,7 +1204,7 @@
           if (dragging && container.contains(dragging)) {
             if (!afterElement) container.appendChild(dragging); else container.insertBefore(dragging, afterElement);
           }
-        });
+        }, { signal });
         container.addEventListener('drop', e => {
           e.preventDefault();
           const tileId = parseInt(container.dataset.tileId);
@@ -1196,18 +1212,31 @@
           const tile = state.dashboard.tiles[tileId];
           if (!tile || !tile.data[listType]) return;
           const newIdOrder = Array.from(container.children).map(child => child.dataset.itemId).filter(id => id);
-          tile.data[listType].filter(item => item?.id).sort((a, b) => newIdOrder.indexOf(a.id.toString()) - newIdOrder.indexOf(b.id.toString()));
+          const items = tile.data[listType].filter(item => item?.id);
+          items.sort((a, b) => newIdOrder.indexOf(a.id.toString()) - newIdOrder.indexOf(b.id.toString()));
+          tile.data[listType] = items;
           saveState(); renderAll();
-        });
+        }, { signal });
       });
     }
 
     function initRowDragAndDrop() {
       const container = document.getElementById('dashboard'); if (!container) return;
+      // Abort previous listeners to prevent duplicates
+      if (_rowDragController) _rowDragController.abort();
+      _rowDragController = new AbortController();
+      const signal = _rowDragController.signal;
+
       container.querySelectorAll('.dashboard-row').forEach(row => {
         row.setAttribute('draggable', true);
-        row.addEventListener('dragstart', () => row.classList.add('item-dragging'));
-        row.addEventListener('dragend', () => row.classList.remove('item-dragging'));
+        row.addEventListener('dragstart', () => row.classList.add('item-dragging'), { signal });
+        row.addEventListener('dragend', () => {
+          row.classList.remove('item-dragging');
+          // Persist new order on drag end
+          const newOrderIds = Array.from(container.children).filter(c => c.classList?.contains('dashboard-row')).map(r => parseInt(r.dataset.rowId));
+          state.dashboard.rows.sort((a, b) => newOrderIds.indexOf(a.id) - newOrderIds.indexOf(b.id));
+          saveState();
+        }, { signal });
       });
       container.addEventListener('dragover', e => {
         e.preventDefault();
@@ -1215,13 +1244,10 @@
         const dragging = container.querySelector('.dashboard-row.item-dragging');
         if (!dragging) return;
         if (!afterElement) container.appendChild(dragging); else container.insertBefore(dragging, afterElement);
-      });
+      }, { signal });
       container.addEventListener('drop', e => {
         e.preventDefault();
-        const newOrderIds = Array.from(container.children).filter(c => c.classList?.contains('dashboard-row')).map(r => parseInt(r.dataset.rowId));
-        state.dashboard.rows.sort((a, b) => newOrderIds.indexOf(a.id) - newOrderIds.indexOf(b.id));
-        saveState(); renderAll();
-      }, { once: true });
+      }, { signal });
     }
 
     function getDragAfterElement(container, y) {
@@ -1318,6 +1344,8 @@
     function saveBillEdit() {
       const bill = state.checkTracker.bills.find(b => b.id === editingBillId);
       if (!bill) return;
+      const oldName = bill.name;
+      const oldCategory = bill.category;
       bill.name = document.getElementById('billEditName').value || 'New Bill';
       bill.amount = parseFloat(document.getElementById('billEditAmount').value) || 0;
       bill.category = document.getElementById('billEditCategory').value;
@@ -1327,7 +1355,21 @@
       bill.type = document.getElementById('billEditType').value;
       if (bill.type === 'limited') bill.totalToPay = parseFloat(document.getElementById('billEditTotalToPay').value) || 0;
       else delete bill.totalToPay;
-      saveState(); renderBills(); renderCalendar(); hideBillEditModal();
+
+      // Retroactively update category on all historical payment records for this bill
+      if (bill.category !== oldCategory || bill.name !== oldName) {
+        const matchName = bill.name !== oldName ? oldName : bill.name;
+        state.checkTracker.checkLogs.forEach(log => {
+          log.items.forEach(item => {
+            if (item.bill === matchName) {
+              item.category = bill.category;
+              if (bill.name !== oldName) item.bill = bill.name;
+            }
+          });
+        });
+      }
+
+      saveState(); renderBills(); renderCalendar(); renderAnalytics(); hideBillEditModal();
     }
 
     function addBill() {
@@ -1511,7 +1553,7 @@
 
       if (target.classList.contains('add-item-btn')) {
         const newItemId = log.items.length > 0 ? Math.max(...log.items.map(i => i.id)) + 1 : 1;
-        log.items.push({ id: newItemId, bill: 'One-time expense', cost: 0, dueDate: new Date().toISOString().split('T')[0], paid: false });
+        log.items.push({ id: newItemId, bill: 'One-time expense', cost: 0, category: 'Other', dueDate: new Date().toISOString().split('T')[0], paid: false });
         saveState(); renderCheckLogs();
       } else if (target.classList.contains('delete-log-btn')) {
         showConfirmModal('Delete Check Log', 'Are you sure you want to delete this check log?', () => {
@@ -1629,6 +1671,16 @@
         case 'last6': cutoff = new Date(now.getFullYear(), now.getMonth() - 5, 1); break;
         case 'last12': cutoff = new Date(now.getFullYear(), now.getMonth() - 11, 1); break;
         case 'all': return state.checkTracker.checkLogs;
+        case 'byYear': {
+          const yearSelect = document.getElementById('historyYearSelect');
+          const selectedYear = parseInt(yearSelect?.value);
+          if (!selectedYear) return state.checkTracker.checkLogs;
+          return state.checkTracker.checkLogs.filter(log => {
+            if (log.year) return log.year === selectedYear;
+            if (log.startDate) return new Date(log.startDate).getFullYear() === selectedYear;
+            return false;
+          });
+        }
       }
       if (!cutoff) return state.checkTracker.checkLogs;
       return state.checkTracker.checkLogs.filter(log => {
@@ -1649,7 +1701,7 @@
       logs.forEach(log => {
         log.items.forEach(item => {
           if (item.paid) {
-            const cat = billCategoryMap[item.bill] || 'Other';
+            const cat = item.category || billCategoryMap[item.bill] || 'Other';
             totals[cat] = (totals[cat] || 0) + (Number(item.cost) || 0);
           }
         });
@@ -1671,9 +1723,33 @@
     }
 
     const CHART_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#84cc16', '#6366f1', '#14b8a6'];
+    let yoyChartInstance = null;
+
+    function getAvailableYears() {
+      const years = new Set();
+      state.checkTracker.checkLogs.forEach(log => {
+        if (log.year) years.add(log.year);
+        else if (log.startDate) years.add(new Date(log.startDate).getFullYear());
+      });
+      return [...years].sort((a, b) => b - a);
+    }
 
     function renderAnalytics() {
       const period = document.getElementById('historyTimePeriod')?.value || 'last6';
+
+      // Show/hide year selector
+      const yearSelect = document.getElementById('historyYearSelect');
+      if (yearSelect) {
+        yearSelect.classList.toggle('hidden', period !== 'byYear');
+        if (period === 'byYear') {
+          const years = getAvailableYears();
+          const currentVal = yearSelect.value;
+          yearSelect.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+          if (currentVal && years.includes(parseInt(currentVal))) yearSelect.value = currentVal;
+          else if (years.length > 0) yearSelect.value = years[0];
+        }
+      }
+
       const logs = getFilteredLogs(period);
       const categoryTotals = getCategoryTotals(logs);
       const trend = getMonthlyTrend(logs);
@@ -1730,6 +1806,43 @@
 
       // Top recurring bills
       renderTopBills();
+
+      // Year-over-Year chart (shown for All Time and By Year)
+      const yoyContainer = document.getElementById('yoyChartContainer');
+      if (yoyChartInstance) { yoyChartInstance.destroy(); yoyChartInstance = null; }
+      if (period === 'all' || period === 'byYear') {
+        yoyContainer.classList.remove('hidden');
+        const allLogs = state.checkTracker.checkLogs;
+        const yearlyTotals = {};
+        allLogs.forEach(log => {
+          let year;
+          if (log.year) year = log.year;
+          else if (log.startDate) year = new Date(log.startDate).getFullYear();
+          else return;
+          if (!yearlyTotals[year]) yearlyTotals[year] = 0;
+          log.items.forEach(item => { if (item.paid) yearlyTotals[year] += Number(item.cost) || 0; });
+        });
+        const yoyYears = Object.keys(yearlyTotals).sort();
+        const yoyValues = yoyYears.map(y => yearlyTotals[y]);
+        const yoyCtx = document.getElementById('yoyChart').getContext('2d');
+        yoyChartInstance = new Chart(yoyCtx, {
+          type: 'bar',
+          data: {
+            labels: yoyYears,
+            datasets: [{ label: 'Total Spending', data: yoyValues, backgroundColor: CHART_COLORS.slice(0, yoyYears.length).map(c => c + '99'), borderColor: CHART_COLORS.slice(0, yoyYears.length), borderWidth: 1, borderRadius: 6 }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { color: 'rgba(51,65,85,0.3)' }, ticks: { color: '#64748b', font: { size: 11 } } },
+              y: { grid: { color: 'rgba(51,65,85,0.3)' }, ticks: { color: '#64748b', font: { size: 10 }, callback: v => '$' + v.toLocaleString() } }
+            }
+          }
+        });
+      } else {
+        yoyContainer.classList.add('hidden');
+      }
     }
 
     function renderCategoryBreakdown(categoryTotals, totalSpent, logs, period) {
@@ -1829,13 +1942,13 @@
         const year = payDate.getFullYear(); const startMonth = payDate.getMonth();
         const startDue = new Date(year, startMonth, bill.dueDay);
         if (startDue >= payDate && startDue <= endDate) {
-          items.push({ id: items.length + 1, bill: bill.name, cost: bill.amount, dueDate: startDue.toISOString().split('T')[0], paid: false });
+          items.push({ id: items.length + 1, bill: bill.name, cost: bill.amount, category: bill.category || 'Other', dueDate: startDue.toISOString().split('T')[0], paid: false });
         }
         const endMonth = endDate.getMonth(); const endYear = endDate.getFullYear();
         if (endMonth !== startMonth) {
           const nextDue = new Date(endYear, endMonth, bill.dueDay);
           if (nextDue >= payDate && nextDue <= endDate) {
-            items.push({ id: items.length + 1, bill: bill.name, cost: bill.amount, dueDate: nextDue.toISOString().split('T')[0], paid: false });
+            items.push({ id: items.length + 1, bill: bill.name, cost: bill.amount, category: bill.category || 'Other', dueDate: nextDue.toISOString().split('T')[0], paid: false });
           }
         }
       });
@@ -2025,6 +2138,7 @@
 
       // Analytics time period
       document.getElementById('historyTimePeriod')?.addEventListener('change', renderAnalytics);
+      document.getElementById('historyYearSelect')?.addEventListener('change', renderAnalytics);
 
       // Category breakdown sorting
       document.getElementById('categoryBreakdownTable')?.querySelector('thead')?.addEventListener('click', e => {

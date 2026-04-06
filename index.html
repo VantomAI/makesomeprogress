@@ -229,10 +229,59 @@
 
     /* Responsive adjustments */
     @media (max-width: 640px) {
-      .tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
-      .tab-btn { font-size: 0.75rem; padding: 0.5rem 0.75rem; }
+      .tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+      .tabs::-webkit-scrollbar { display: none; }
+      .tab-btn { font-size: 0.75rem; padding: 0.625rem 0.75rem; min-height: 44px; }
       .calendar-day { min-height: 60px; padding: 2px; font-size: 0.5625rem; }
+
+      /* Ensure no horizontal overflow */
+      .container { max-width: 100vw; overflow-x: hidden; }
+      body { overflow-x: hidden; }
+
+      /* 44px minimum tap targets */
+      .btn, button, select, input[type="checkbox"] { min-height: 44px; }
+      .btn-xs { min-height: 36px; padding: 0.375rem 0.625rem; }
+      .btn-sm { min-height: 44px; }
+      input, select, textarea { min-height: 44px; font-size: 16px; }
+      input[type="checkbox"] { width: 1.25rem; height: 1.25rem; min-height: auto; }
+
+      /* Cards reflow to single column */
+      .grid-cols-2, .sm\:grid-cols-4 { grid-template-columns: 1fr 1fr !important; }
+
+      /* Stat cards */
+      .stat-card { padding: 0.75rem; }
+      .stat-card .text-lg { font-size: 1rem; }
+
+      /* Check log table → card layout on mobile */
+      #checkLogHistory table { font-size: 0.75rem; }
+      #checkLogHistory th, #checkLogHistory td { padding: 0.375rem 0.25rem; }
+      #checkLogHistory .item-input { min-height: 40px; font-size: 14px; }
+
+      /* Chart containers responsive */
+      .chart-container { height: 220px; }
+
+      /* Header actions wrap better */
+      .actions { gap: 0.375rem; }
+      .actions .btn { font-size: 0.6875rem; padding: 0.375rem 0.625rem; }
+
+      /* Category breakdown table */
+      #categoryBreakdownTable { font-size: 0.75rem; }
+      #categoryBreakdownTable th, #categoryBreakdownTable td { padding: 0.375rem 0.25rem; }
     }
+
+    /* Full-screen modal on mobile for check log editing */
+    @media (max-width: 640px) {
+      .modal-content { border-radius: 0; max-height: 100vh; height: 100%; width: 100% !important; max-width: 100% !important; }
+      #billEditModal .modal-content,
+      #tileModal .modal-content { position: fixed; inset: 0; border-radius: 0; overflow-y: auto; padding: 1.25rem; }
+      #billEditModal .modal-content input,
+      #billEditModal .modal-content select,
+      #tileModal .modal-content input,
+      #tileModal .modal-content select { font-size: 16px; min-height: 48px; }
+    }
+
+    /* Ensure chart.js canvas is responsive */
+    .chart-container canvas { max-width: 100% !important; }
   </style>
 </head>
 <body class="p-3 sm:p-6">
@@ -246,13 +295,14 @@
         </div>
       </div>
       <div class="actions flex items-center gap-2 flex-wrap">
+        <button class="btn btn-secondary btn-sm" id="settingsBtn" title="Settings" style="display:none;">&#9881;</button>
         <button class="btn btn-secondary btn-sm" id="editDashboardBtn">Edit Dashboard</button>
         <button class="btn btn-primary btn-sm editing-controls" id="addRowBtn">+ Row</button>
-        <button class="btn btn-secondary btn-sm" id="exportBtn">Export</button>
-        <button class="btn btn-secondary btn-sm" id="exportTextBtn">Export Text</button>
+        <button class="btn btn-secondary btn-sm hidden sm:inline-flex" id="exportBtn">Export</button>
+        <button class="btn btn-secondary btn-sm hidden sm:inline-flex" id="exportTextBtn">Export Text</button>
         <button class="btn btn-secondary btn-sm" id="syncBtn">Refresh</button>
-        <label id="importBtn" class="btn btn-secondary btn-sm cursor-pointer">Import <input type="file" id="importFile" class="hidden" accept=".json"></label>
-        <button class="btn btn-danger btn-sm" id="resetBtn">Reset</button>
+        <label id="importBtn" class="btn btn-secondary btn-sm cursor-pointer hidden sm:inline-flex">Import <input type="file" id="importFile" class="hidden" accept=".json"></label>
+        <button class="btn btn-danger btn-sm hidden sm:inline-flex" id="resetBtn">Reset</button>
         <button class="btn btn-secondary btn-sm" id="authBtn">Log in/Sign Up</button>
         <button class="btn btn-primary btn-sm" id="saveToCloudBtn">Save</button>
       </div>
@@ -261,9 +311,9 @@
     <div class="tabs">
       <button class="tab-btn active" data-tab="dashboard-tab">Dashboard</button>
       <button class="tab-btn" data-tab="check-logs-tab">Check Logs</button>
-      <button class="tab-btn" data-tab="bills-tab">Recurring Bills</button>
+      <button class="tab-btn" data-tab="bills-tab">Expenses</button>
       <button class="tab-btn" data-tab="calendar-tab">Calendar</button>
-      <button class="tab-btn" data-tab="search-tab">Bill History</button>
+      <button class="tab-btn" data-tab="search-tab">Expense History</button>
       <button class="tab-btn" data-tab="mobile-budget-tab">Mobile Budget</button>
     </div>
 
@@ -310,13 +360,16 @@
         <div id="checkLogHistory" class="mt-4 space-y-4"></div>
       </div>
 
-      <!-- Recurring Bills Tab -->
+      <!-- Expenses Tab (Recurring + One-Time) -->
       <div id="bills-tab" class="tab-content">
-        <div class="card p-5">
+        <!-- Recurring Expenses Section -->
+        <div class="card p-5 mb-4">
           <div class="flex flex-col sm:flex-row justify-between items-center mb-5 gap-4">
-            <h3 class="text-lg font-semibold text-white">Recurring Bills</h3>
+            <h3 class="text-lg font-semibold text-white">Recurring Expenses</h3>
             <div class="flex items-center gap-2 flex-wrap">
-              <button class="btn btn-primary btn-sm" id="addBillBtn">+ New Bill</button>
+              <button class="btn btn-primary btn-sm" id="addBillBtn">+ New Recurring</button>
+              <button class="btn btn-secondary btn-sm" id="syncCalendarBtn" style="display:none;">Sync to Calendar</button>
+              <span id="calSyncStatus" class="text-xs text-slate-500" style="display:none;"></span>
               <label for="billSortSelect" class="text-xs text-slate-400">Sort:</label>
               <select id="billSortSelect" class="text-xs w-24">
                 <option value="name">Name</option>
@@ -331,6 +384,15 @@
             </div>
           </div>
           <div id="billsContainer" class="grid gap-3"></div>
+        </div>
+
+        <!-- One-Time Expenses Section -->
+        <div class="card p-5">
+          <div class="flex flex-col sm:flex-row justify-between items-center mb-5 gap-4">
+            <h3 class="text-lg font-semibold text-white">One-Time Expenses</h3>
+            <button class="btn btn-primary btn-sm" id="addOneTimeBtn">+ Add One-Time</button>
+          </div>
+          <div id="oneTimeContainer" class="grid gap-3"></div>
         </div>
       </div>
 
@@ -482,6 +544,9 @@
         </div>
         <button type="button" class="btn btn-primary w-full" id="signupSubmitBtn">Create Account</button>
       </form>
+      <div class="mt-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+        <p class="text-xs text-emerald-300 text-center">Try the demo: <strong>demo@makesomeprogress.app</strong> / <strong>Demo2026!</strong></p>
+      </div>
       <div class="flex justify-between items-center mt-4">
         <button type="button" id="toggleAuthBtn" class="text-sm text-emerald-400 hover:text-emerald-300 underline">Create Account</button>
         <button type="button" class="btn btn-secondary btn-sm" onclick="hideAuthModal()">Close</button>
@@ -512,6 +577,33 @@
     </div>
   </div>
 
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div class="modal-content p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <h2 class="text-xl font-semibold mb-4 text-white">Settings</h2>
+      <div class="space-y-6">
+        <div>
+          <h3 class="text-sm font-semibold text-slate-300 mb-3">Connected Services</h3>
+          <div id="googleCalSection" class="p-4 rounded-lg bg-slate-800/50 border border-slate-700/50">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none"><path d="M18.5 4h-13A1.5 1.5 0 004 5.5v13A1.5 1.5 0 005.5 20h13a1.5 1.5 0 001.5-1.5v-13A1.5 1.5 0 0018.5 4z" stroke="#34d399" stroke-width="1.5"/><path d="M16 2v4M8 2v4M4 10h16" stroke="#34d399" stroke-width="1.5" stroke-linecap="round"/></svg>
+                <span class="text-sm text-white font-medium">Google Calendar</span>
+              </div>
+              <span id="gcalStatus" class="text-xs text-slate-500">Not connected</span>
+            </div>
+            <p class="text-xs text-slate-400 mb-3">Sync recurring expenses as calendar events with due date reminders.</p>
+            <button class="btn btn-primary btn-sm w-full" id="connectGoogleCalBtn">Connect Google Calendar</button>
+            <button class="btn btn-danger btn-sm w-full mt-2 hidden" id="disconnectGoogleCalBtn">Disconnect</button>
+          </div>
+        </div>
+      </div>
+      <div class="flex justify-end mt-6">
+        <button class="btn btn-secondary" onclick="hideSettingsModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // ===================== STATE MANAGEMENT =====================
     const STORAGE_KEY = 'unified-financial-dashboard-v1';
@@ -522,8 +614,9 @@
 
     const DEFAULT_STATE = {
       dashboard: { rows: [], tiles: {}, nextRowId: 1, nextTileId: 1, isEditing: false },
-      checkTracker: { bills: [], checkLogs: [] },
-      calendar: { currentDate: new Date().toISOString() }
+      checkTracker: { bills: [], checkLogs: [], oneTimeExpenses: [] },
+      calendar: { currentDate: new Date().toISOString() },
+      appStates: {}
     };
 
     // ===================== CATEGORIES =====================
@@ -545,6 +638,17 @@
       if (!cat) return 'Other';
       if (BILL_CATEGORIES.includes(cat)) return cat;
       return LEGACY_CATEGORY_MAP[cat] || 'Other';
+    }
+
+    // Dynamic category resolution: expense definition owns the category
+    function resolveCategory(paymentRecord, expensesList) {
+      if (!expensesList || !Array.isArray(expensesList)) return migrateCategory(paymentRecord.category) || 'Other';
+      const billName = (paymentRecord.bill || '').toLowerCase().trim();
+      if (billName) {
+        const match = expensesList.find(e => (e.name || '').toLowerCase().trim() === billName);
+        if (match && match.category) return migrateCategory(match.category);
+      }
+      return migrateCategory(paymentRecord.category) || 'Other';
     }
 
     // ===================== RECURRENCE INTERVALS =====================
@@ -665,7 +769,9 @@
         state = JSON.parse(saved);
         state.dashboard = state.dashboard || DEFAULT_STATE.dashboard;
         state.checkTracker = state.checkTracker || DEFAULT_STATE.checkTracker;
+        state.checkTracker.oneTimeExpenses = state.checkTracker.oneTimeExpenses || [];
         state.calendar = state.calendar || DEFAULT_STATE.calendar;
+        state.appStates = state.appStates || {};
         state.dashboard.isEditing = false;
 
         // Data migration
@@ -1339,9 +1445,24 @@
       document.getElementById('billEditModal').classList.add('hidden');
       document.getElementById('billEditModal').classList.remove('flex');
       editingBillId = null;
+      editingOneTimeId = null;
     }
 
     function saveBillEdit() {
+      // If editing a one-time expense, dispatch there
+      if (editingOneTimeId !== null) {
+        const exp = (state.checkTracker.oneTimeExpenses || []).find(e => e.id === editingOneTimeId);
+        if (exp) {
+          exp.name = document.getElementById('billEditName').value || 'New Expense';
+          exp.amount = parseFloat(document.getElementById('billEditAmount').value) || 0;
+          exp.category = document.getElementById('billEditCategory').value;
+          exp.date = document.getElementById('billEditFirstDueDate').value || '';
+          saveState(); renderOneTimeExpenses(); renderAnalytics(); hideBillEditModal();
+          editingOneTimeId = null;
+        }
+        return;
+      }
+
       const bill = state.checkTracker.bills.find(b => b.id === editingBillId);
       if (!bill) return;
       const oldName = bill.name;
@@ -1393,6 +1514,93 @@
       });
     }
 
+    // ===================== ONE-TIME EXPENSES =====================
+    function getOneTimeExpenses() {
+      const manual = state.checkTracker.oneTimeExpenses || [];
+      // Auto-populate from check logs: items not matching any recurring bill
+      const recurringNames = new Set(state.checkTracker.bills.map(b => b.name.toLowerCase().trim()));
+      const fromLogs = [];
+      state.checkTracker.checkLogs.forEach(log => {
+        log.items.forEach(item => {
+          if (!recurringNames.has((item.bill || '').toLowerCase().trim()) && item.paid) {
+            fromLogs.push({
+              id: `log-${log.id}-${item.id}`,
+              name: item.bill || 'Unnamed',
+              amount: Number(item.cost) || 0,
+              date: item.dueDate || log.startDate || '',
+              category: resolveCategory(item, state.checkTracker.bills),
+              source: 'checklog'
+            });
+          }
+        });
+      });
+      return [...manual, ...fromLogs];
+    }
+
+    function renderOneTimeExpenses() {
+      const container = document.getElementById('oneTimeContainer');
+      if (!container) return;
+      const expenses = getOneTimeExpenses();
+      if (expenses.length === 0) {
+        container.innerHTML = '<div class="text-center py-6 text-slate-500 text-sm"><p>No one-time expenses yet. Add manually or they will auto-populate from Check Logs.</p></div>';
+        return;
+      }
+      container.innerHTML = '';
+      expenses.forEach(exp => {
+        const card = document.createElement('div');
+        card.className = 'flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50 transition-colors';
+        const isManual = exp.source !== 'checklog';
+        card.innerHTML = `
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <h4 class="font-semibold text-white text-sm truncate">${exp.name}</h4>
+              <span class="badge ${isManual ? 'badge-upcoming' : 'badge-paid'}">${isManual ? 'Manual' : 'From Log'}</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
+              <span class="font-semibold text-emerald-400">${formatCurrency(exp.amount)}</span>
+              <span class="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">${exp.category || 'Other'}</span>
+              ${exp.date ? `<span>${formatDateForDisplay(exp.date)}</span>` : ''}
+            </div>
+          </div>
+          ${isManual ? `<button class="btn btn-danger btn-xs remove-onetime-btn" data-id="${exp.id}">Remove</button>` : ''}
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function addOneTimeExpense() {
+      if (!state.checkTracker.oneTimeExpenses) state.checkTracker.oneTimeExpenses = [];
+      const newId = Date.now();
+      const exp = { id: newId, name: 'New Expense', amount: 0, date: new Date().toISOString().split('T')[0], category: 'Other' };
+      state.checkTracker.oneTimeExpenses.push(exp);
+      saveState();
+      showOneTimeEditModal(newId);
+    }
+
+    function removeOneTimeExpense(id) {
+      state.checkTracker.oneTimeExpenses = (state.checkTracker.oneTimeExpenses || []).filter(e => e.id !== id);
+      saveState(); renderOneTimeExpenses();
+    }
+
+    let editingOneTimeId = null;
+
+    function showOneTimeEditModal(expId) {
+      editingOneTimeId = expId;
+      const exp = (state.checkTracker.oneTimeExpenses || []).find(e => e.id === expId);
+      if (!exp) return;
+      const modal = document.getElementById('billEditModal');
+      const fields = document.getElementById('billEditFields');
+      fields.innerHTML = `
+        <div><label class="text-xs font-medium text-slate-400 mb-1 block">Expense Name</label><input type="text" id="billEditName" value="${exp.name}"></div>
+        <div><label class="text-xs font-medium text-slate-400 mb-1 block">Amount</label><input type="number" id="billEditAmount" value="${exp.amount}" step="0.01"></div>
+        <div><label class="text-xs font-medium text-slate-400 mb-1 block">Category</label>
+          <select id="billEditCategory">${BILL_CATEGORIES.map(cat => `<option value="${cat}" ${exp.category === cat ? 'selected' : ''}>${cat}</option>`).join('')}</select>
+        </div>
+        <div><label class="text-xs font-medium text-slate-400 mb-1 block">Date</label><input type="date" id="billEditFirstDueDate" value="${exp.date || ''}"></div>
+      `;
+      modal.classList.remove('hidden'); modal.classList.add('flex');
+    }
+
     function sortBills(criteria, order = 'asc') {
       state.checkTracker.bills.sort((a, b) => {
         let result;
@@ -1426,10 +1634,10 @@
           <tr class="${item.paid ? 'text-slate-500' : ''} border-b border-slate-800 list-item-draggable" data-item-id="${item.id}" draggable="true">
             <td class="p-2"><input type="checkbox" class="item-paid" ${item.paid ? 'checked' : ''}></td>
             <td class="p-2"><input type="text" class="item-input text-xs" data-prop="bill" value="${item.bill}"></td>
-            <td class="p-2"><input type="number" class="item-input text-xs w-20" data-prop="cost" value="${item.cost}"></td>
-            <td class="p-2"><input type="date" class="item-input text-xs" data-prop="dueDate" value="${item.dueDate}"></td>
-            <td class="p-2 running-total text-right text-xs"></td>
-            <td class="p-2 running-balance text-right text-xs"></td>
+            <td class="p-2"><input type="number" class="item-input text-xs w-20" data-prop="cost" value="${item.cost}" step="0.01"></td>
+            <td class="p-2 hidden sm:table-cell"><input type="date" class="item-input text-xs" data-prop="dueDate" value="${item.dueDate}"></td>
+            <td class="p-2 running-total text-right text-xs hidden sm:table-cell"></td>
+            <td class="p-2 running-balance text-right text-xs hidden sm:table-cell"></td>
             <td class="p-2"><button class="btn btn-danger btn-xs remove-item-btn">X</button></td>
           </tr>
         `).join('');
@@ -1462,7 +1670,7 @@
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
-              <thead><tr class="border-b border-slate-700 text-slate-500 text-xs"><th class="p-2 text-left">Paid</th><th class="p-2 text-left">Bill</th><th class="p-2 text-left">Cost</th><th class="p-2 text-left">Due Date</th><th class="p-2 text-right">Paid Total</th><th class="p-2 text-right">Balance</th><th></th></tr></thead>
+              <thead><tr class="border-b border-slate-700 text-slate-500 text-xs"><th class="p-2 text-left">Paid</th><th class="p-2 text-left">Bill</th><th class="p-2 text-left">Cost</th><th class="p-2 text-left hidden sm:table-cell">Due Date</th><th class="p-2 text-right hidden sm:table-cell">Paid Total</th><th class="p-2 text-right hidden sm:table-cell">Balance</th><th></th></tr></thead>
               <tbody>${itemsHtml}</tbody>
             </table>
           </div>
@@ -1693,23 +1901,29 @@
       });
     }
 
-    function getCategoryTotals(logs) {
-      const billCategoryMap = {};
-      state.checkTracker.bills.forEach(b => { billCategoryMap[b.name] = b.category || 'Other'; });
+    function getCategoryTotals(logs, includeOneTime) {
+      const allExpenses = state.checkTracker.bills || [];
       const totals = {};
       BILL_CATEGORIES.forEach(cat => { totals[cat] = 0; });
       logs.forEach(log => {
         log.items.forEach(item => {
           if (item.paid) {
-            const cat = item.category || billCategoryMap[item.bill] || 'Other';
+            const cat = resolveCategory(item, allExpenses);
             totals[cat] = (totals[cat] || 0) + (Number(item.cost) || 0);
           }
         });
       });
+      // Include one-time expenses in category totals
+      if (includeOneTime && state.checkTracker.oneTimeExpenses) {
+        state.checkTracker.oneTimeExpenses.forEach(exp => {
+          const cat = migrateCategory(exp.category) || 'Other';
+          totals[cat] = (totals[cat] || 0) + (Number(exp.amount) || 0);
+        });
+      }
       return totals;
     }
 
-    function getMonthlyTrend(logs) {
+    function getMonthlyTrend(logs, includeOneTime) {
       const monthlyData = {};
       logs.forEach(log => {
         let key;
@@ -1719,6 +1933,17 @@
         if (!monthlyData[key]) monthlyData[key] = 0;
         log.items.forEach(item => { if (item.paid) monthlyData[key] += Number(item.cost) || 0; });
       });
+      // Include one-time expenses in monthly trend
+      if (includeOneTime && state.checkTracker.oneTimeExpenses) {
+        state.checkTracker.oneTimeExpenses.forEach(exp => {
+          if (exp.date) {
+            const d = new Date(exp.date);
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            if (!monthlyData[key]) monthlyData[key] = 0;
+            monthlyData[key] += Number(exp.amount) || 0;
+          }
+        });
+      }
       return Object.entries(monthlyData).sort((a, b) => a[0].localeCompare(b[0]));
     }
 
@@ -1751,8 +1976,8 @@
       }
 
       const logs = getFilteredLogs(period);
-      const categoryTotals = getCategoryTotals(logs);
-      const trend = getMonthlyTrend(logs);
+      const categoryTotals = getCategoryTotals(logs, true);
+      const trend = getMonthlyTrend(logs, true);
       const totalSpent = Object.values(categoryTotals).reduce((s, v) => s + v, 0);
 
       // Stats
@@ -1821,6 +2046,14 @@
           else return;
           if (!yearlyTotals[year]) yearlyTotals[year] = 0;
           log.items.forEach(item => { if (item.paid) yearlyTotals[year] += Number(item.cost) || 0; });
+        });
+        // Include one-time expenses in yearly totals
+        (state.checkTracker.oneTimeExpenses || []).forEach(exp => {
+          if (exp.date) {
+            const year = new Date(exp.date).getFullYear();
+            if (!yearlyTotals[year]) yearlyTotals[year] = 0;
+            yearlyTotals[year] += Number(exp.amount) || 0;
+          }
         });
         const yoyYears = Object.keys(yearlyTotals).sort();
         const yoyValues = yoyYears.map(y => yearlyTotals[y]);
@@ -2054,10 +2287,194 @@
       if (modified) saveState();
     }
 
+    // ===================== GOOGLE CALENDAR SYNC =====================
+    const GOOGLE_CLIENT_ID = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_GOOGLE_CLIENT_ID) || window.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
+
+    function isGoogleCalEnabled() {
+      // Check for env var via meta tag or global
+      const meta = document.querySelector('meta[name="google-client-id"]');
+      return !!(GOOGLE_CLIENT_ID || (meta && meta.content));
+    }
+
+    function getGoogleClientId() {
+      const meta = document.querySelector('meta[name="google-client-id"]');
+      return GOOGLE_CLIENT_ID || (meta && meta.content) || '';
+    }
+
+    function getGoogleCalToken() {
+      return state.appStates?.googleCalendarToken || null;
+    }
+
+    function setGoogleCalToken(token) {
+      if (!state.appStates) state.appStates = {};
+      state.appStates.googleCalendarToken = token;
+      saveState();
+    }
+
+    function initGoogleCalUI() {
+      const settingsBtn = document.getElementById('settingsBtn');
+      const syncCalBtn = document.getElementById('syncCalendarBtn');
+      const calSyncStatus = document.getElementById('calSyncStatus');
+
+      if (isGoogleCalEnabled()) {
+        if (settingsBtn) settingsBtn.style.display = '';
+        if (syncCalBtn) syncCalBtn.style.display = '';
+        updateGoogleCalStatus();
+      } else {
+        // Always show settings gear but hide Google-specific features if no client ID
+        if (settingsBtn) settingsBtn.style.display = '';
+        const gcalSection = document.getElementById('googleCalSection');
+        if (gcalSection) gcalSection.innerHTML = '<p class="text-xs text-slate-500">Google Calendar integration requires a NEXT_PUBLIC_GOOGLE_CLIENT_ID environment variable. Set it to enable this feature.</p>';
+      }
+    }
+
+    function updateGoogleCalStatus() {
+      const token = getGoogleCalToken();
+      const statusEl = document.getElementById('gcalStatus');
+      const connectBtn = document.getElementById('connectGoogleCalBtn');
+      const disconnectBtn = document.getElementById('disconnectGoogleCalBtn');
+      const syncCalBtn = document.getElementById('syncCalendarBtn');
+      const calSyncStatus = document.getElementById('calSyncStatus');
+
+      if (token) {
+        if (statusEl) statusEl.textContent = 'Connected';
+        if (statusEl) statusEl.className = 'text-xs text-emerald-400';
+        if (connectBtn) connectBtn.classList.add('hidden');
+        if (disconnectBtn) disconnectBtn.classList.remove('hidden');
+        if (syncCalBtn) syncCalBtn.style.display = '';
+        if (calSyncStatus) {
+          calSyncStatus.style.display = '';
+          const lastSync = state.appStates?.lastCalSync;
+          calSyncStatus.textContent = lastSync ? `Last synced: ${new Date(lastSync).toLocaleString()}` : '';
+        }
+      } else {
+        if (statusEl) { statusEl.textContent = 'Not connected'; statusEl.className = 'text-xs text-slate-500'; }
+        if (connectBtn) connectBtn.classList.remove('hidden');
+        if (disconnectBtn) disconnectBtn.classList.add('hidden');
+        if (syncCalBtn) syncCalBtn.style.display = 'none';
+        if (calSyncStatus) calSyncStatus.style.display = 'none';
+      }
+    }
+
+    function showSettingsModal() {
+      updateGoogleCalStatus();
+      const modal = document.getElementById('settingsModal');
+      modal.classList.remove('hidden'); modal.classList.add('flex');
+    }
+
+    function hideSettingsModal() {
+      document.getElementById('settingsModal').classList.add('hidden');
+      document.getElementById('settingsModal').classList.remove('flex');
+    }
+
+    function connectGoogleCalendar() {
+      const clientId = getGoogleClientId();
+      if (!clientId) { window.showToast('Google Client ID not configured.', 'error'); return; }
+      const redirectUri = window.location.origin + window.location.pathname;
+      const scope = 'https://www.googleapis.com/auth/calendar.events';
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}&prompt=consent`;
+      window.location.href = authUrl;
+    }
+
+    function disconnectGoogleCalendar() {
+      if (state.appStates) {
+        delete state.appStates.googleCalendarToken;
+        delete state.appStates.lastCalSync;
+      }
+      saveState();
+      updateGoogleCalStatus();
+      window.showToast('Google Calendar disconnected.', 'info');
+    }
+
+    function handleOAuthCallback() {
+      const hash = window.location.hash;
+      if (hash.includes('access_token=')) {
+        const params = new URLSearchParams(hash.substring(1));
+        const token = params.get('access_token');
+        if (token) {
+          setGoogleCalToken(token);
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          window.showToast('Google Calendar connected!', 'success');
+          updateGoogleCalStatus();
+        }
+      }
+    }
+
+    function getRecurrenceRule(interval) {
+      switch (interval) {
+        case 'weekly': return 'RRULE:FREQ=WEEKLY';
+        case 'biweekly': return 'RRULE:FREQ=WEEKLY;INTERVAL=2';
+        case 'monthly': return 'RRULE:FREQ=MONTHLY';
+        case 'bimonthly': return 'RRULE:FREQ=MONTHLY;INTERVAL=2';
+        case 'quarterly': return 'RRULE:FREQ=MONTHLY;INTERVAL=3';
+        case 'semiannual': return 'RRULE:FREQ=MONTHLY;INTERVAL=6';
+        case 'annual': return 'RRULE:FREQ=YEARLY';
+        default: return 'RRULE:FREQ=MONTHLY';
+      }
+    }
+
+    async function syncToGoogleCalendar() {
+      const token = getGoogleCalToken();
+      if (!token) { window.showToast('Please connect Google Calendar first.', 'error'); return; }
+
+      const bills = state.checkTracker.bills || [];
+      if (bills.length === 0) { window.showToast('No recurring expenses to sync.', 'info'); return; }
+
+      let synced = 0, failed = 0;
+      for (const bill of bills) {
+        try {
+          const statusInfo = getBillStatus(bill);
+          const nextDue = statusInfo.nextDue;
+          if (!nextDue) continue;
+
+          const dateStr = nextDue.toISOString().split('T')[0];
+          const intervalLabel = RECURRENCE_INTERVALS.find(i => i.value === bill.recurrenceInterval)?.label || bill.recurrenceInterval || 'Monthly';
+
+          let colorId = '7'; // default (peacock/teal)
+          if (statusInfo.status === 'overdue') colorId = '11'; // red
+          else if (statusInfo.status === 'due-soon') colorId = '5'; // yellow/banana
+
+          const event = {
+            summary: `${bill.name} — ${formatCurrency(bill.amount)}`,
+            description: `Category: ${bill.category || 'Other'} | Due every ${intervalLabel}`,
+            start: { date: dateStr },
+            end: { date: dateStr },
+            recurrence: [getRecurrenceRule(bill.recurrenceInterval || 'monthly')],
+            colorId
+          };
+
+          const resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(event)
+          });
+
+          if (resp.ok) synced++;
+          else {
+            const err = await resp.json().catch(() => ({}));
+            if (resp.status === 401) {
+              setGoogleCalToken(null);
+              updateGoogleCalStatus();
+              window.showToast('Google Calendar token expired. Please reconnect.', 'error');
+              return;
+            }
+            failed++;
+          }
+        } catch (e) { failed++; }
+      }
+
+      if (!state.appStates) state.appStates = {};
+      state.appStates.lastCalSync = new Date().toISOString();
+      saveState();
+      updateGoogleCalStatus();
+      window.showToast(`Synced ${synced} expense(s) to Google Calendar.${failed > 0 ? ` ${failed} failed.` : ''}`, synced > 0 ? 'success' : 'error');
+    }
+
     // ===================== MAIN RENDER =====================
     function renderAll() {
       renderDashboard();
       renderBills();
+      renderOneTimeExpenses();
       renderCheckLogs();
       renderCalendar();
       renderBillSearch();
@@ -2123,6 +2540,15 @@
         if (removeBtn) removeBill(parseInt(removeBtn.dataset.id));
       });
       document.getElementById('saveBillEditBtn').addEventListener('click', saveBillEdit);
+
+      // One-time expenses
+      document.getElementById('addOneTimeBtn').onclick = addOneTimeExpense;
+      document.getElementById('oneTimeContainer').addEventListener('click', e => {
+        const removeBtn = e.target.closest('.remove-onetime-btn');
+        if (removeBtn) removeOneTimeExpense(parseInt(removeBtn.dataset.id));
+        const editBtn = e.target.closest('.edit-onetime-btn');
+        if (editBtn) showOneTimeEditModal(parseInt(editBtn.dataset.id));
+      });
 
       const billSortSelect = document.getElementById('billSortSelect');
       const billSortOrder = document.getElementById('billSortOrder');
@@ -2195,10 +2621,19 @@
       document.getElementById('saveToCloudBtn')?.addEventListener('click', saveDataToCloud);
       document.getElementById('exportTextBtn')?.addEventListener('click', exportText);
 
+      // Settings & Google Calendar
+      document.getElementById('settingsBtn')?.addEventListener('click', showSettingsModal);
+      document.getElementById('settingsModal')?.addEventListener('click', e => { if (e.target.id === 'settingsModal') hideSettingsModal(); });
+      document.getElementById('connectGoogleCalBtn')?.addEventListener('click', connectGoogleCalendar);
+      document.getElementById('disconnectGoogleCalBtn')?.addEventListener('click', disconnectGoogleCalendar);
+      document.getElementById('syncCalendarBtn')?.addEventListener('click', syncToGoogleCalendar);
+
       // Load and render
       updateAuthUI();
       loadState();
       runStartupChecks();
+      handleOAuthCallback();
+      initGoogleCalUI();
       renderAll();
       const initialTab = window.shouldDefaultToMobileView() ? 'mobile-budget-tab' : 'dashboard-tab';
       setActiveTab(initialTab);

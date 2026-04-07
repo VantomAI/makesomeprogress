@@ -441,6 +441,16 @@
           <!-- Stats Row -->
           <div id="spendingStats" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4"></div>
 
+          <!-- Savings & Investments Tile -->
+          <div id="savingsTile" class="card p-5 mb-4 hidden" style="border-color: #059669; background: linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%);">
+            <div class="flex items-center gap-2 mb-3">
+              <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <h4 class="text-sm font-semibold text-emerald-300">Savings & Investments</h4>
+            </div>
+            <div id="savingsStats" class="grid grid-cols-3 gap-3 mb-3"></div>
+            <div id="savingsBreakdown"></div>
+          </div>
+
           <!-- Charts Row -->
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
             <div class="card p-5">
@@ -623,6 +633,7 @@
     const DEFAULT_STATE = {
       dashboard: { rows: [], tiles: {}, nextRowId: 1, nextTileId: 1, isEditing: false },
       checkTracker: { bills: [], checkLogs: [], oneTimeExpenses: [] },
+      oneTimeExpenseCategoryOverrides: {},
       calendar: { currentDate: new Date().toISOString() },
       appStates: {}
     };
@@ -631,8 +642,14 @@
     const BILL_CATEGORIES = [
       'Housing', 'Utilities', 'Subscriptions', 'Insurance', 'Transportation',
       'Food & Dining', 'Health & Medical', 'Entertainment',
-      'Savings/Investment', 'Debt', 'Other'
+      'Savings/Investment', 'Debt', 'Shopping', 'Other'
     ];
+
+    const SAVINGS_CATEGORIES = ['Savings/Investment', 'Savings & Investments'];
+
+    function isSavingsCategory(cat) {
+      return SAVINGS_CATEGORIES.some(s => s.toLowerCase() === (cat || '').toLowerCase());
+    }
 
     // Legacy category mapping for backward compatibility
     const LEGACY_CATEGORY_MAP = {
@@ -778,6 +795,7 @@
         state.dashboard = state.dashboard || DEFAULT_STATE.dashboard;
         state.checkTracker = state.checkTracker || DEFAULT_STATE.checkTracker;
         state.checkTracker.oneTimeExpenses = state.checkTracker.oneTimeExpenses || [];
+        state.oneTimeExpenseCategoryOverrides = state.oneTimeExpenseCategoryOverrides || {};
         state.calendar = state.calendar || DEFAULT_STATE.calendar;
         state.appStates = state.appStates || {};
         state.dashboard.isEditing = false;
@@ -1485,23 +1503,42 @@
       if (bill.type === 'limited') bill.totalToPay = parseFloat(document.getElementById('billEditTotalToPay').value) || 0;
       else delete bill.totalToPay;
 
-      // Retroactively update category on all historical payment records for this bill
-      if (bill.category !== oldCategory || bill.name !== oldName) {
-        const matchName = bill.name !== oldName ? oldName : bill.name;
+      // Write-through: update category on ALL historical check log items matching this bill
+      {
+        const matchName = (bill.name !== oldName ? oldName : bill.name).toLowerCase().trim();
+        const newName = bill.name;
+        const newCategory = bill.category;
         state.checkTracker.checkLogs.forEach(log => {
           log.items.forEach(item => {
-            if (item.bill === matchName) {
-              item.category = bill.category;
-              if (bill.name !== oldName) item.bill = bill.name;
+            if ((item.bill || '').toLowerCase().trim() === matchName) {
+              item.category = newCategory;
+              if (bill.name !== oldName) item.bill = newName;
             }
           });
         });
+        // Also update one-time expense category overrides that match by name
+        if (state.oneTimeExpenseCategoryOverrides) {
+          for (const [key, _cat] of Object.entries(state.oneTimeExpenseCategoryOverrides)) {
+            const parts = key.split('-');
+            if (parts.length >= 2) {
+              const checkId = parseInt(parts[0].replace('check', ''));
+              const itemId = parseInt(parts[1].replace('item', ''));
+              const log = state.checkTracker.checkLogs.find(l => l.id === checkId);
+              if (log) {
+                const item = log.items.find(i => i.id === itemId);
+                if (item && (item.bill || '').toLowerCase().trim() === matchName) {
+                  state.oneTimeExpenseCategoryOverrides[key] = newCategory;
+                }
+              }
+            }
+          }
+        }
       }
 
       // Update GCal event if one exists for this bill
       if (bill.gcalEventId && getGoogleCalToken()) updateGcalEvent(bill);
 
-      saveState(); saveDataToCloud(); renderBills(); renderCalendar(); renderAnalytics(); hideBillEditModal();
+      saveState(); saveDataToCloud(); renderBills(); renderOneTimeExpenses(); renderCalendar(); renderAnalytics(); hideBillEditModal();
     }
 
     function addBill() {
@@ -1528,26 +1565,107 @@
     }
 
     // ===================== ONE-TIME EXPENSES =====================
+
+    // Keyword-based auto-categorization for one-time expenses
+    const ONE_TIME_CATEGORY_RULES = [
+      { keywords: ['mcdonald', 'burger', 'chipotle', 'whataburger', 'popeyes', 'chic fil a', 'chick-fil-a', 'taco', 'pizza', 'sushi', 'restaurant', 'breakfast', 'lunch', 'dinner'], category: 'Food & Dining' },
+      { keywords: ['gas', 'racetrac', '7-eleven', '7 eleven', 'shell', 'exxon', 'fuel'], category: 'Transportation' },
+      { keywords: ['walmart', 'target', 'costco', 'market', 'grocery', 'groceries', 'h-e-b'], category: 'Food & Dining' },
+      { keywords: ['amazon', 'ebay', 'etsy'], category: 'Shopping' },
+      { keywords: ['netflix', 'spotify', 'hulu', 'disney', 'xbox', 'playstation', 'steam', 'gaming', 'suno', 'discord'], category: 'Subscriptions' },
+      { keywords: ['rent', 'mortgage', 'insurance', 'hoa'], category: 'Housing' },
+      { keywords: ['doctor', 'dr ', 'medical', 'pharmacy', 'meds', 'psych', 'pain management', 'appt', 'clinic'], category: 'Health & Medical' },
+      { keywords: ['att', 'verizon', 'electric', 'water', 'internet', 'utility'], category: 'Utilities' },
+      { keywords: ['savings', 'save', 'investment', '401k', 'ira'], category: 'Savings/Investment' },
+      { keywords: ['uber', 'lyft', 'transit', 'parking', 'car wash'], category: 'Transportation' }
+    ];
+
+    function autoCategorizeOneTime(name) {
+      const lower = (name || '').toLowerCase().trim();
+      if (!lower) return 'Other';
+      // 1. Check if name matches a recurring expense (inherit category)
+      const matchBill = state.checkTracker.bills.find(b => (b.name || '').toLowerCase().trim() === lower);
+      if (matchBill && matchBill.category) return migrateCategory(matchBill.category);
+      // 2. Check if name substring-matches a recurring expense
+      const substringBill = state.checkTracker.bills.find(b => {
+        const bn = (b.name || '').toLowerCase().trim();
+        return bn && (lower.includes(bn) || bn.includes(lower));
+      });
+      if (substringBill && substringBill.category) return migrateCategory(substringBill.category);
+      // 3. Check if any previously overridden one-time expense has same name
+      const overrides = state.oneTimeExpenseCategoryOverrides || {};
+      for (const [key, cat] of Object.entries(overrides)) {
+        // Extract the name: we stored overrides by composite key, so look up items
+        const parts = key.split('-');
+        if (parts.length >= 2) {
+          const checkId = parseInt(parts[0].replace('check', ''));
+          const itemId = parseInt(parts[1].replace('item', ''));
+          const log = state.checkTracker.checkLogs.find(l => l.id === checkId);
+          if (log) {
+            const item = log.items.find(i => i.id === itemId);
+            if (item && (item.bill || '').toLowerCase().trim() === lower) return cat;
+          }
+        }
+      }
+      // 4. Keyword rules
+      for (const rule of ONE_TIME_CATEGORY_RULES) {
+        if (rule.keywords.some(kw => lower.includes(kw))) return rule.category;
+      }
+      return 'Other';
+    }
+
+    function getOneTimeExpenseCategory(checkId, itemId, item) {
+      const key = `check${checkId}-item${itemId}`;
+      const overrides = state.oneTimeExpenseCategoryOverrides || {};
+      if (overrides[key]) return overrides[key];
+      // If item has a category already written through, use it
+      if (item.category && item.category !== 'Other') return migrateCategory(item.category);
+      return autoCategorizeOneTime(item.bill || item.name || '');
+    }
+
     function getOneTimeExpenses() {
       const manual = state.checkTracker.oneTimeExpenses || [];
-      // Auto-populate from check logs: items not matching any recurring bill
+      // Auto-populate from check logs: every item not matching a recurring bill = one row
       const recurringNames = new Set(state.checkTracker.bills.map(b => b.name.toLowerCase().trim()));
       const fromLogs = [];
       state.checkTracker.checkLogs.forEach(log => {
         log.items.forEach(item => {
           if (!recurringNames.has((item.bill || '').toLowerCase().trim()) && item.paid) {
             fromLogs.push({
-              id: `log-${log.id}-${item.id}`,
+              id: `check${log.id}-item${item.id}`,
               name: item.bill || 'Unnamed',
               amount: Number(item.cost) || 0,
               date: item.dueDate || log.startDate || '',
-              category: resolveCategory(item, state.checkTracker.bills),
-              source: 'checklog'
+              category: getOneTimeExpenseCategory(log.id, item.id, item),
+              source: 'checklog',
+              checkName: log.name || `Check ${log.id}`,
+              checkId: log.id,
+              itemId: item.id
             });
           }
         });
       });
       return [...manual, ...fromLogs];
+    }
+
+    function saveOneTimeCategoryOverride(compositeKey, category) {
+      if (!state.oneTimeExpenseCategoryOverrides) state.oneTimeExpenseCategoryOverrides = {};
+      state.oneTimeExpenseCategoryOverrides[compositeKey] = category;
+      // Also write the category onto the check log item directly
+      const parts = compositeKey.split('-');
+      if (parts.length >= 2) {
+        const checkId = parseInt(parts[0].replace('check', ''));
+        const itemId = parseInt(parts[1].replace('item', ''));
+        const log = state.checkTracker.checkLogs.find(l => l.id === checkId);
+        if (log) {
+          const item = log.items.find(i => i.id === itemId);
+          if (item) item.category = category;
+        }
+      }
+      saveState();
+      saveDataToCloud();
+      renderOneTimeExpenses();
+      renderAnalytics();
     }
 
     function renderOneTimeExpenses() {
@@ -1563,21 +1681,41 @@
         const card = document.createElement('div');
         card.className = 'flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50 transition-colors';
         const isManual = exp.source !== 'checklog';
+        const categoryOptions = BILL_CATEGORIES.map(cat =>
+          `<option value="${cat}" ${exp.category === cat ? 'selected' : ''}>${cat}</option>`
+        ).join('');
         card.innerHTML = `
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
               <h4 class="font-semibold text-white text-sm truncate">${exp.name}</h4>
-              <span class="badge ${isManual ? 'badge-upcoming' : 'badge-paid'}">${isManual ? 'Manual' : 'From Log'}</span>
+              <span class="badge ${isManual ? 'badge-upcoming' : 'badge-paid'}">${isManual ? 'Manual' : exp.checkName || 'From Log'}</span>
             </div>
             <div class="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
               <span class="font-semibold text-emerald-400">${formatCurrency(exp.amount)}</span>
-              <span class="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">${exp.category || 'Other'}</span>
+              <select class="onetime-category-select text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 border border-slate-600" data-key="${exp.id}">${categoryOptions}</select>
               ${exp.date ? `<span>${formatDateForDisplay(exp.date)}</span>` : ''}
             </div>
           </div>
           ${isManual ? `<button class="btn btn-danger btn-xs remove-onetime-btn" data-id="${exp.id}">Remove</button>` : ''}
         `;
         container.appendChild(card);
+      });
+
+      // Attach category change handlers
+      container.querySelectorAll('.onetime-category-select').forEach(sel => {
+        sel.addEventListener('change', (e) => {
+          const key = e.target.dataset.key;
+          const newCat = e.target.value;
+          // For manual expenses, update directly
+          const manualExp = (state.checkTracker.oneTimeExpenses || []).find(ex => String(ex.id) === key);
+          if (manualExp) {
+            manualExp.category = newCat;
+            saveState(); saveDataToCloud(); renderAnalytics();
+          } else {
+            // For checklog items, save as override
+            saveOneTimeCategoryOverride(key, newCat);
+          }
+        });
       });
     }
 
@@ -1915,28 +2053,40 @@
     }
 
     function getCategoryTotals(logs, includeOneTime) {
-      const allExpenses = state.checkTracker.bills || [];
       const totals = {};
       BILL_CATEGORIES.forEach(cat => { totals[cat] = 0; });
+      // Read categories directly from check log items (write-through ensures they're up to date)
+      const allExpenses = state.checkTracker.bills || [];
       logs.forEach(log => {
         log.items.forEach(item => {
           if (item.paid) {
-            const cat = resolveCategory(item, allExpenses);
+            // Prefer item.category (written through), fallback to resolveCategory
+            const cat = item.category ? migrateCategory(item.category) : resolveCategory(item, allExpenses);
             totals[cat] = (totals[cat] || 0) + (Number(item.cost) || 0);
           }
         });
       });
-      // Include one-time expenses in category totals
-      if (includeOneTime && state.checkTracker.oneTimeExpenses) {
-        state.checkTracker.oneTimeExpenses.forEach(exp => {
-          const cat = migrateCategory(exp.category) || 'Other';
-          totals[cat] = (totals[cat] || 0) + (Number(exp.amount) || 0);
+      // Include one-time expenses from check logs (non-recurring items)
+      if (includeOneTime) {
+        const recurringNames = new Set((state.checkTracker.bills || []).map(b => b.name.toLowerCase().trim()));
+        logs.forEach(log => {
+          log.items.forEach(item => {
+            // Already counted above if paid — skip double-counting
+          });
         });
+        // Include manual one-time expenses
+        if (state.checkTracker.oneTimeExpenses) {
+          state.checkTracker.oneTimeExpenses.forEach(exp => {
+            const cat = migrateCategory(exp.category) || 'Other';
+            totals[cat] = (totals[cat] || 0) + (Number(exp.amount) || 0);
+          });
+        }
       }
       return totals;
     }
 
-    function getMonthlyTrend(logs, includeOneTime) {
+    function getMonthlyTrend(logs, includeOneTime, excludeSavings = false) {
+      const allExpenses = state.checkTracker.bills || [];
       const monthlyData = {};
       logs.forEach(log => {
         let key;
@@ -1944,12 +2094,21 @@
         else if (log.startDate) { const d = new Date(log.startDate); key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
         else return;
         if (!monthlyData[key]) monthlyData[key] = 0;
-        log.items.forEach(item => { if (item.paid) monthlyData[key] += Number(item.cost) || 0; });
+        log.items.forEach(item => {
+          if (item.paid) {
+            if (excludeSavings) {
+              const cat = item.category ? migrateCategory(item.category) : resolveCategory(item, allExpenses);
+              if (isSavingsCategory(cat)) return;
+            }
+            monthlyData[key] += Number(item.cost) || 0;
+          }
+        });
       });
-      // Include one-time expenses in monthly trend
+      // Include manual one-time expenses in monthly trend
       if (includeOneTime && state.checkTracker.oneTimeExpenses) {
         state.checkTracker.oneTimeExpenses.forEach(exp => {
           if (exp.date) {
+            if (excludeSavings && isSavingsCategory(exp.category)) return;
             const d = new Date(exp.date);
             const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
             if (!monthlyData[key]) monthlyData[key] = 0;
@@ -1958,6 +2117,61 @@
         });
       }
       return Object.entries(monthlyData).sort((a, b) => a[0].localeCompare(b[0]));
+    }
+
+    // Get savings totals from check logs (items with savings category)
+    function getSavingsData(logs) {
+      const allExpenses = state.checkTracker.bills || [];
+      const monthlyData = {};
+      let periodTotal = 0;
+      logs.forEach(log => {
+        let key;
+        if (log.year && log.month) key = `${log.year}-${String(log.month).padStart(2, '0')}`;
+        else if (log.startDate) { const d = new Date(log.startDate); key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+        else return;
+        if (!monthlyData[key]) monthlyData[key] = 0;
+        log.items.forEach(item => {
+          if (item.paid) {
+            const cat = item.category ? migrateCategory(item.category) : resolveCategory(item, allExpenses);
+            if (isSavingsCategory(cat)) {
+              monthlyData[key] += Number(item.cost) || 0;
+              periodTotal += Number(item.cost) || 0;
+            }
+          }
+        });
+      });
+      // Include manual one-time savings
+      if (state.checkTracker.oneTimeExpenses) {
+        state.checkTracker.oneTimeExpenses.forEach(exp => {
+          if (isSavingsCategory(exp.category) && exp.date) {
+            const d = new Date(exp.date);
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            if (!monthlyData[key]) monthlyData[key] = 0;
+            monthlyData[key] += Number(exp.amount) || 0;
+            periodTotal += Number(exp.amount) || 0;
+          }
+        });
+      }
+      // All-time total
+      let allTimeTotal = 0;
+      state.checkTracker.checkLogs.forEach(log => {
+        log.items.forEach(item => {
+          if (item.paid) {
+            const cat = item.category ? migrateCategory(item.category) : resolveCategory(item, allExpenses);
+            if (isSavingsCategory(cat)) allTimeTotal += Number(item.cost) || 0;
+          }
+        });
+      });
+      if (state.checkTracker.oneTimeExpenses) {
+        state.checkTracker.oneTimeExpenses.forEach(exp => {
+          if (isSavingsCategory(exp.category)) allTimeTotal += Number(exp.amount) || 0;
+        });
+      }
+      return {
+        monthly: Object.entries(monthlyData).sort((a, b) => a[0].localeCompare(b[0])),
+        periodTotal,
+        allTimeTotal
+      };
     }
 
     const CHART_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#84cc16', '#6366f1', '#14b8a6'];
@@ -1990,23 +2204,30 @@
 
       const logs = getFilteredLogs(period);
       const categoryTotals = getCategoryTotals(logs, true);
-      const trend = getMonthlyTrend(logs, true);
-      const totalSpent = Object.values(categoryTotals).reduce((s, v) => s + v, 0);
+
+      // Exclude savings from spending totals
+      const spendingTotals = {};
+      for (const [cat, val] of Object.entries(categoryTotals)) {
+        if (!isSavingsCategory(cat)) spendingTotals[cat] = val;
+      }
+
+      const trend = getMonthlyTrend(logs, true, true); // exclude savings
+      const totalSpent = Object.values(spendingTotals).reduce((s, v) => s + v, 0);
 
       // Stats
       const avgMonthly = trend.length > 0 ? totalSpent / trend.length : 0;
-      const topCategory = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1])[0];
+      const topCategory = Object.entries(spendingTotals).sort((a, b) => b[1] - a[1])[0];
       const statsContainer = document.getElementById('spendingStats');
       statsContainer.innerHTML = `
         <div class="stat-card"><p class="text-xs text-slate-500 mb-1">Total Spent</p><p class="text-lg font-bold text-white">${formatCurrency(totalSpent)}</p></div>
         <div class="stat-card"><p class="text-xs text-slate-500 mb-1">Avg Monthly</p><p class="text-lg font-bold text-white">${formatCurrency(avgMonthly)}</p></div>
         <div class="stat-card"><p class="text-xs text-slate-500 mb-1">Top Category</p><p class="text-lg font-bold text-emerald-400">${topCategory ? topCategory[0] : 'N/A'}</p></div>
-        <div class="stat-card"><p class="text-xs text-slate-500 mb-1">Categories Used</p><p class="text-lg font-bold text-white">${Object.values(categoryTotals).filter(v => v > 0).length}</p></div>
+        <div class="stat-card"><p class="text-xs text-slate-500 mb-1">Categories Used</p><p class="text-lg font-bold text-white">${Object.values(spendingTotals).filter(v => v > 0).length}</p></div>
       `;
 
-      // Category chart (doughnut)
-      const catLabels = Object.keys(categoryTotals).filter(k => categoryTotals[k] > 0);
-      const catValues = catLabels.map(k => categoryTotals[k]);
+      // Category chart (doughnut) — exclude savings
+      const catLabels = Object.keys(spendingTotals).filter(k => spendingTotals[k] > 0);
+      const catValues = catLabels.map(k => spendingTotals[k]);
       if (categoryChartInstance) categoryChartInstance.destroy();
       const catCtx = document.getElementById('categoryChart').getContext('2d');
       categoryChartInstance = new Chart(catCtx, {
@@ -2019,7 +2240,7 @@
         }
       });
 
-      // Trend chart (line)
+      // Trend chart (line) — already excludes savings
       if (trendChartInstance) trendChartInstance.destroy();
       const trendCtx = document.getElementById('trendChart').getContext('2d');
       const trendLabels = trend.map(t => { const [y, m] = t[0].split('-'); return new Date(y, m - 1).toLocaleString('default', { month: 'short', year: '2-digit' }); });
@@ -2039,18 +2260,22 @@
         }
       });
 
-      // Category breakdown table
-      renderCategoryBreakdown(categoryTotals, totalSpent, logs, period);
+      // Category breakdown table — exclude savings
+      renderCategoryBreakdown(spendingTotals, totalSpent, logs, period);
 
       // Top recurring bills
       renderTopBills();
 
-      // Year-over-Year chart (shown for All Time and By Year)
+      // Savings & Investments tile
+      renderSavingsTile(logs);
+
+      // Year-over-Year chart (shown for All Time and By Year) — exclude savings
       const yoyContainer = document.getElementById('yoyChartContainer');
       if (yoyChartInstance) { yoyChartInstance.destroy(); yoyChartInstance = null; }
       if (period === 'all' || period === 'byYear') {
         yoyContainer.classList.remove('hidden');
         const allLogs = state.checkTracker.checkLogs;
+        const allExpenses = state.checkTracker.bills || [];
         const yearlyTotals = {};
         allLogs.forEach(log => {
           let year;
@@ -2058,11 +2283,16 @@
           else if (log.startDate) year = new Date(log.startDate).getFullYear();
           else return;
           if (!yearlyTotals[year]) yearlyTotals[year] = 0;
-          log.items.forEach(item => { if (item.paid) yearlyTotals[year] += Number(item.cost) || 0; });
+          log.items.forEach(item => {
+            if (item.paid) {
+              const cat = item.category ? migrateCategory(item.category) : resolveCategory(item, allExpenses);
+              if (!isSavingsCategory(cat)) yearlyTotals[year] += Number(item.cost) || 0;
+            }
+          });
         });
-        // Include one-time expenses in yearly totals
+        // Include manual one-time expenses (non-savings) in yearly totals
         (state.checkTracker.oneTimeExpenses || []).forEach(exp => {
-          if (exp.date) {
+          if (exp.date && !isSavingsCategory(exp.category)) {
             const year = new Date(exp.date).getFullYear();
             if (!yearlyTotals[year]) yearlyTotals[year] = 0;
             yearlyTotals[year] += Number(exp.amount) || 0;
@@ -2088,6 +2318,57 @@
         });
       } else {
         yoyContainer.classList.add('hidden');
+      }
+    }
+
+    function renderSavingsTile(filteredLogs) {
+      const tile = document.getElementById('savingsTile');
+      const savings = getSavingsData(filteredLogs);
+      if (savings.allTimeTotal === 0 && savings.periodTotal === 0) {
+        tile.classList.add('hidden');
+        return;
+      }
+      tile.classList.remove('hidden');
+
+      // Stats row
+      const avgMonthly = savings.monthly.length > 0 ? savings.periodTotal / savings.monthly.length : 0;
+      document.getElementById('savingsStats').innerHTML = `
+        <div class="stat-card" style="background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3);">
+          <p class="text-xs text-emerald-400/70 mb-1">Period Total</p>
+          <p class="text-lg font-bold text-emerald-300">${formatCurrency(savings.periodTotal)}</p>
+        </div>
+        <div class="stat-card" style="background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3);">
+          <p class="text-xs text-emerald-400/70 mb-1">Avg Monthly</p>
+          <p class="text-lg font-bold text-emerald-300">${formatCurrency(avgMonthly)}</p>
+        </div>
+        <div class="stat-card" style="background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3);">
+          <p class="text-xs text-emerald-400/70 mb-1">All-Time Total</p>
+          <p class="text-lg font-bold text-emerald-300">${formatCurrency(savings.allTimeTotal)}</p>
+        </div>
+      `;
+
+      // Monthly breakdown list
+      if (savings.monthly.length > 0) {
+        const maxVal = Math.max(...savings.monthly.map(m => m[1]));
+        document.getElementById('savingsBreakdown').innerHTML = `
+          <h5 class="text-xs font-medium text-emerald-400/70 mb-2">Monthly Breakdown</h5>
+          <div class="space-y-1.5">
+            ${savings.monthly.map(([key, val]) => {
+              const [y, m] = key.split('-');
+              const label = new Date(y, m - 1).toLocaleString('default', { month: 'short', year: '2-digit' });
+              const pct = maxVal > 0 ? (val / maxVal * 100).toFixed(0) : 0;
+              return `<div class="flex items-center gap-3">
+                <span class="text-xs text-emerald-300/70 w-20">${label}</span>
+                <div class="flex-1 h-2 rounded-full bg-emerald-900/50 overflow-hidden">
+                  <div class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400" style="width:${pct}%"></div>
+                </div>
+                <span class="text-xs font-semibold text-emerald-300 w-20 text-right">${formatCurrency(val)}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        `;
+      } else {
+        document.getElementById('savingsBreakdown').innerHTML = '';
       }
     }
 

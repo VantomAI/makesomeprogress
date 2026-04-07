@@ -426,8 +426,10 @@
           <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-3">
             <h3 class="text-lg font-semibold text-white">Spending Analytics</h3>
             <div class="flex gap-2 flex-wrap items-center">
-              <select id="historyTimePeriod" class="text-xs w-36">
+              <select id="historyTimePeriod" class="text-xs w-44">
                 <option value="thisMonth">This Month</option>
+                <option value="lastMonth">Last Month</option>
+                <option value="sameMonthLastYear">Same Month Last Year</option>
                 <option value="last3">Last 3 Months</option>
                 <option value="last6" selected>Last 6 Months</option>
                 <option value="last12">Last 12 Months</option>
@@ -442,10 +444,10 @@
           <div id="spendingStats" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4"></div>
 
           <!-- Savings & Investments Tile -->
-          <div id="savingsTile" class="card p-5 mb-4 hidden" style="border-color: #059669; background: linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%);">
+          <div id="savingsTile" class="card p-5 mb-4 hidden" style="border-left: 3px solid #059669;">
             <div class="flex items-center gap-2 mb-3">
               <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              <h4 class="text-sm font-semibold text-emerald-300">Savings & Investments</h4>
+              <h4 class="text-sm font-semibold text-emerald-400">Savings & Investments</h4>
             </div>
             <div id="savingsStats" class="grid grid-cols-3 gap-3 mb-3"></div>
             <div id="savingsBreakdown"></div>
@@ -494,11 +496,14 @@
           </div>
         </div>
 
-        <!-- Bill Payment History Search -->
+        <!-- Expense History Drill-Down -->
         <div class="card p-5">
-          <h3 class="text-lg font-semibold mb-4 text-white">Bill Payment History</h3>
-          <select id="billSearchSelect" class="mb-4"></select>
-          <div id="billHistoryResults"></div>
+          <h3 class="text-lg font-semibold mb-4 text-white">Expense History</h3>
+          <div class="flex gap-2 mb-4">
+            <button id="expHistoryRecurringBtn" class="btn btn-primary text-xs" onclick="switchExpenseHistoryType('recurring')">Recurring Expenses</button>
+            <button id="expHistoryOneTimeBtn" class="btn text-xs bg-slate-700 text-slate-300 hover:bg-slate-600" onclick="switchExpenseHistoryType('onetime')">One-Time Expenses</button>
+          </div>
+          <div id="expenseHistoryContent"></div>
         </div>
       </div>
     </div>
@@ -2026,6 +2031,38 @@
       let cutoff = null;
       switch (period) {
         case 'thisMonth': cutoff = new Date(now.getFullYear(), now.getMonth(), 1); break;
+        case 'lastMonth': {
+          const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          const end = new Date(now.getFullYear(), now.getMonth(), 1);
+          return state.checkTracker.checkLogs.filter(log => {
+            if (log.year && log.month) {
+              const logDate = new Date(log.year, log.month - 1, 1);
+              return logDate >= start && logDate < end;
+            }
+            if (log.startDate) {
+              const d = new Date(log.startDate);
+              return d >= start && d < end;
+            }
+            return false;
+          });
+        }
+        case 'sameMonthLastYear': {
+          const targetYear = now.getFullYear() - 1;
+          const targetMonth = now.getMonth();
+          const start = new Date(targetYear, targetMonth, 1);
+          const end = new Date(targetYear, targetMonth + 1, 1);
+          return state.checkTracker.checkLogs.filter(log => {
+            if (log.year && log.month) {
+              const logDate = new Date(log.year, log.month - 1, 1);
+              return logDate >= start && logDate < end;
+            }
+            if (log.startDate) {
+              const d = new Date(log.startDate);
+              return d >= start && d < end;
+            }
+            return false;
+          });
+        }
         case 'last3': cutoff = new Date(now.getFullYear(), now.getMonth() - 2, 1); break;
         case 'last6': cutoff = new Date(now.getFullYear(), now.getMonth() - 5, 1); break;
         case 'last12': cutoff = new Date(now.getFullYear(), now.getMonth() - 11, 1); break;
@@ -2319,6 +2356,9 @@
       } else {
         yoyContainer.classList.add('hidden');
       }
+
+      // Expense history drill-down
+      renderExpenseHistory();
     }
 
     function renderSavingsTile(filteredLogs) {
@@ -2333,17 +2373,17 @@
       // Stats row
       const avgMonthly = savings.monthly.length > 0 ? savings.periodTotal / savings.monthly.length : 0;
       document.getElementById('savingsStats').innerHTML = `
-        <div class="stat-card" style="background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3);">
-          <p class="text-xs text-emerald-400/70 mb-1">Period Total</p>
-          <p class="text-lg font-bold text-emerald-300">${formatCurrency(savings.periodTotal)}</p>
+        <div class="stat-card">
+          <p class="text-xs text-slate-500 mb-1">Period Total</p>
+          <p class="text-lg font-bold text-emerald-400">${formatCurrency(savings.periodTotal)}</p>
         </div>
-        <div class="stat-card" style="background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3);">
-          <p class="text-xs text-emerald-400/70 mb-1">Avg Monthly</p>
-          <p class="text-lg font-bold text-emerald-300">${formatCurrency(avgMonthly)}</p>
+        <div class="stat-card">
+          <p class="text-xs text-slate-500 mb-1">Avg Monthly</p>
+          <p class="text-lg font-bold text-emerald-400">${formatCurrency(avgMonthly)}</p>
         </div>
-        <div class="stat-card" style="background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3);">
-          <p class="text-xs text-emerald-400/70 mb-1">All-Time Total</p>
-          <p class="text-lg font-bold text-emerald-300">${formatCurrency(savings.allTimeTotal)}</p>
+        <div class="stat-card">
+          <p class="text-xs text-slate-500 mb-1">All-Time Total</p>
+          <p class="text-lg font-bold text-emerald-400">${formatCurrency(savings.allTimeTotal)}</p>
         </div>
       `;
 
@@ -2351,18 +2391,18 @@
       if (savings.monthly.length > 0) {
         const maxVal = Math.max(...savings.monthly.map(m => m[1]));
         document.getElementById('savingsBreakdown').innerHTML = `
-          <h5 class="text-xs font-medium text-emerald-400/70 mb-2">Monthly Breakdown</h5>
+          <h5 class="text-xs font-medium text-slate-500 mb-2">Monthly Breakdown</h5>
           <div class="space-y-1.5">
             ${savings.monthly.map(([key, val]) => {
               const [y, m] = key.split('-');
               const label = new Date(y, m - 1).toLocaleString('default', { month: 'short', year: '2-digit' });
               const pct = maxVal > 0 ? (val / maxVal * 100).toFixed(0) : 0;
               return `<div class="flex items-center gap-3">
-                <span class="text-xs text-emerald-300/70 w-20">${label}</span>
-                <div class="flex-1 h-2 rounded-full bg-emerald-900/50 overflow-hidden">
+                <span class="text-xs text-slate-400 w-20">${label}</span>
+                <div class="flex-1 h-2 rounded-full progress-bar-bg overflow-hidden">
                   <div class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400" style="width:${pct}%"></div>
                 </div>
-                <span class="text-xs font-semibold text-emerald-300 w-20 text-right">${formatCurrency(val)}</span>
+                <span class="text-xs font-semibold text-emerald-400 w-20 text-right">${formatCurrency(val)}</span>
               </div>`;
             }).join('')}
           </div>
@@ -2420,32 +2460,217 @@
       }).join('');
     }
 
+    let expenseHistoryType = 'recurring';
+    let expenseHistoryExpanded = {};
+
     function renderBillSearch() {
-      const select = document.getElementById('billSearchSelect');
-      const results = document.getElementById('billHistoryResults');
-      const currentSelection = select.value;
-      select.innerHTML = '<option value="">Select a bill to see its history</option>';
-      results.innerHTML = '';
-      state.checkTracker.bills.forEach(bill => { select.innerHTML += `<option value="${bill.name}">${bill.name}</option>`; });
-      select.value = currentSelection;
+      renderExpenseHistory();
     }
 
-    function showBillHistory(billName) {
-      const resultsContainer = document.getElementById('billHistoryResults');
-      if (!billName) { resultsContainer.innerHTML = ''; return; }
-      let html = `<h4 class="font-semibold mb-3 text-white text-sm">History for ${billName}</h4><div class="space-y-2">`;
-      let count = 0;
-      state.checkTracker.checkLogs.forEach(log => {
+    function switchExpenseHistoryType(type) {
+      expenseHistoryType = type;
+      expenseHistoryExpanded = {};
+      const recurBtn = document.getElementById('expHistoryRecurringBtn');
+      const oneTimeBtn = document.getElementById('expHistoryOneTimeBtn');
+      if (recurBtn && oneTimeBtn) {
+        if (type === 'recurring') {
+          recurBtn.className = 'btn btn-primary text-xs';
+          oneTimeBtn.className = 'btn text-xs bg-slate-700 text-slate-300 hover:bg-slate-600';
+        } else {
+          oneTimeBtn.className = 'btn btn-primary text-xs';
+          recurBtn.className = 'btn text-xs bg-slate-700 text-slate-300 hover:bg-slate-600';
+        }
+      }
+      renderExpenseHistory();
+    }
+
+    function renderExpenseHistory() {
+      const container = document.getElementById('expenseHistoryContent');
+      if (!container) return;
+      const period = document.getElementById('historyTimePeriod')?.value || 'last6';
+      const filteredLogs = getFilteredLogs(period);
+
+      if (expenseHistoryType === 'recurring') {
+        renderRecurringExpenseHistory(container, filteredLogs);
+      } else {
+        renderOneTimeExpenseHistory(container, filteredLogs);
+      }
+    }
+
+    function renderRecurringExpenseHistory(container, filteredLogs) {
+      const recurringNames = new Set(state.checkTracker.bills.map(b => b.name.toLowerCase().trim()));
+      const billAggregates = {};
+
+      state.checkTracker.bills.forEach(bill => {
+        billAggregates[bill.name] = { name: bill.name, category: bill.category || 'Other', totalPaid: 0, payments: 0, records: [] };
+      });
+
+      filteredLogs.forEach(log => {
         log.items.forEach(item => {
-          if (item.bill === billName && item.paid) {
-            html += `<div class="flex justify-between items-center p-2 rounded bg-slate-800/50 text-xs"><span class="text-slate-300">${log.name} ${log.startDate ? `(${formatDateForDisplay(log.startDate)})` : `(${log.month}/${log.year})`}</span><span class="font-semibold text-emerald-400">${formatCurrency(item.cost)}</span></div>`;
-            count++;
+          if (item.paid && recurringNames.has((item.bill || '').toLowerCase().trim())) {
+            const matchBill = state.checkTracker.bills.find(b => b.name.toLowerCase().trim() === (item.bill || '').toLowerCase().trim());
+            const key = matchBill ? matchBill.name : item.bill;
+            if (!billAggregates[key]) {
+              billAggregates[key] = { name: key, category: matchBill?.category || 'Other', totalPaid: 0, payments: 0, records: [] };
+            }
+            billAggregates[key].totalPaid += Number(item.cost) || 0;
+            billAggregates[key].payments++;
+            billAggregates[key].records.push({
+              date: item.dueDate || log.startDate || '',
+              checkName: log.name || `Check ${log.id}`,
+              amount: Number(item.cost) || 0,
+              paid: item.paid
+            });
           }
         });
       });
-      if (count === 0) html += '<p class="text-xs text-slate-500">No paid history found.</p>';
-      html += '</div>';
-      resultsContainer.innerHTML = html;
+
+      const rows = Object.values(billAggregates).filter(r => r.payments > 0).sort((a, b) => b.totalPaid - a.totalPaid);
+
+      if (rows.length === 0) {
+        container.innerHTML = '<p class="text-sm text-slate-500 py-4">No recurring expense payments found for this period.</p>';
+        return;
+      }
+
+      let html = `<div class="overflow-x-auto"><table class="w-full text-sm">
+        <thead><tr class="border-b border-slate-700 text-slate-400 text-xs">
+          <th class="p-2 text-left">Expense</th>
+          <th class="p-2 text-left hidden sm:table-cell">Category</th>
+          <th class="p-2 text-right">Total Paid</th>
+          <th class="p-2 text-right hidden sm:table-cell"># Payments</th>
+          <th class="p-2 text-right hidden sm:table-cell">Avg/Payment</th>
+        </tr></thead><tbody>`;
+
+      rows.forEach(row => {
+        const avg = row.payments > 0 ? row.totalPaid / row.payments : 0;
+        const isExpanded = expenseHistoryExpanded[`recurring-${row.name}`];
+        html += `<tr class="border-b border-slate-800 hover:bg-slate-800/50 cursor-pointer expense-history-row" data-type="recurring" data-name="${row.name}">
+          <td class="p-2 text-white font-medium"><span class="text-slate-500 mr-1">${isExpanded ? '&#9660;' : '&#9654;'}</span>${row.name}</td>
+          <td class="p-2 text-slate-400 hidden sm:table-cell">${row.category}</td>
+          <td class="p-2 text-right text-emerald-400 font-semibold">${formatCurrency(row.totalPaid)}</td>
+          <td class="p-2 text-right text-slate-300 hidden sm:table-cell">${row.payments}</td>
+          <td class="p-2 text-right text-slate-300 hidden sm:table-cell">${formatCurrency(avg)}</td>
+        </tr>`;
+
+        if (isExpanded) {
+          row.records.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+          row.records.forEach(rec => {
+            html += `<tr class="border-b border-slate-800/50 bg-slate-800/30">
+              <td class="p-2 pl-8 text-xs text-slate-400">${rec.date ? formatDateForDisplay(rec.date) : '—'}</td>
+              <td class="p-2 text-xs text-slate-400 hidden sm:table-cell">${rec.checkName}</td>
+              <td class="p-2 text-right text-xs text-white">${formatCurrency(rec.amount)}</td>
+              <td class="p-2 text-right text-xs hidden sm:table-cell"><span class="badge badge-paid text-xs">Paid</span></td>
+              <td class="p-2 hidden sm:table-cell"></td>
+            </tr>`;
+          });
+        }
+      });
+
+      html += '</tbody></table></div>';
+      container.innerHTML = html;
+
+      container.querySelectorAll('.expense-history-row').forEach(row => {
+        row.addEventListener('click', () => {
+          const key = `${row.dataset.type}-${row.dataset.name}`;
+          expenseHistoryExpanded[key] = !expenseHistoryExpanded[key];
+          renderExpenseHistory();
+        });
+      });
+    }
+
+    function renderOneTimeExpenseHistory(container, filteredLogs) {
+      const recurringNames = new Set(state.checkTracker.bills.map(b => b.name.toLowerCase().trim()));
+      const grouped = {};
+
+      filteredLogs.forEach(log => {
+        log.items.forEach(item => {
+          if (item.paid && !recurringNames.has((item.bill || '').toLowerCase().trim())) {
+            const nameKey = (item.bill || 'Unnamed').toLowerCase().trim();
+            if (!grouped[nameKey]) {
+              grouped[nameKey] = { displayName: item.bill || 'Unnamed', totalSpent: 0, occurrences: 0, lastDate: '', category: getOneTimeExpenseCategory(log.id, item.id, item), records: [] };
+            }
+            const amount = Number(item.cost) || 0;
+            grouped[nameKey].totalSpent += amount;
+            grouped[nameKey].occurrences++;
+            const date = item.dueDate || log.startDate || '';
+            if (date > grouped[nameKey].lastDate) grouped[nameKey].lastDate = date;
+            grouped[nameKey].records.push({
+              date: date,
+              checkName: log.name || `Check ${log.id}`,
+              amount: amount,
+              category: getOneTimeExpenseCategory(log.id, item.id, item),
+              compositeKey: `check${log.id}-item${item.id}`
+            });
+          }
+        });
+      });
+
+      const rows = Object.values(grouped).sort((a, b) => b.totalSpent - a.totalSpent);
+
+      if (rows.length === 0) {
+        container.innerHTML = '<p class="text-sm text-slate-500 py-4">No one-time expenses found for this period.</p>';
+        return;
+      }
+
+      let html = `<div class="overflow-x-auto"><table class="w-full text-sm">
+        <thead><tr class="border-b border-slate-700 text-slate-400 text-xs">
+          <th class="p-2 text-left">Name</th>
+          <th class="p-2 text-left hidden sm:table-cell">Category</th>
+          <th class="p-2 text-right">Total Spent</th>
+          <th class="p-2 text-right hidden sm:table-cell"># Occur.</th>
+          <th class="p-2 text-right hidden sm:table-cell">Last Date</th>
+        </tr></thead><tbody>`;
+
+      rows.forEach(row => {
+        const isExpanded = expenseHistoryExpanded[`onetime-${row.displayName}`];
+        html += `<tr class="border-b border-slate-800 hover:bg-slate-800/50 cursor-pointer expense-history-row" data-type="onetime" data-name="${row.displayName}">
+          <td class="p-2 text-white font-medium"><span class="text-slate-500 mr-1">${isExpanded ? '&#9660;' : '&#9654;'}</span>${row.displayName}</td>
+          <td class="p-2 text-slate-400 hidden sm:table-cell">${row.category}</td>
+          <td class="p-2 text-right text-emerald-400 font-semibold">${formatCurrency(row.totalSpent)}</td>
+          <td class="p-2 text-right text-slate-300 hidden sm:table-cell">${row.occurrences}</td>
+          <td class="p-2 text-right text-slate-300 hidden sm:table-cell">${row.lastDate ? formatDateForDisplay(row.lastDate) : '—'}</td>
+        </tr>`;
+
+        if (isExpanded) {
+          row.records.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+          row.records.forEach(rec => {
+            const categoryOptions = BILL_CATEGORIES.map(cat =>
+              `<option value="${cat}" ${rec.category === cat ? 'selected' : ''}>${cat}</option>`
+            ).join('');
+            html += `<tr class="border-b border-slate-800/50 bg-slate-800/30">
+              <td class="p-2 pl-8 text-xs text-slate-400">${rec.date ? formatDateForDisplay(rec.date) : '—'}</td>
+              <td class="p-2 text-xs hidden sm:table-cell">
+                <select class="expense-history-cat-select text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 border border-slate-600" data-key="${rec.compositeKey}">${categoryOptions}</select>
+              </td>
+              <td class="p-2 text-right text-xs text-white">${formatCurrency(rec.amount)}</td>
+              <td class="p-2 text-right text-xs text-slate-400 hidden sm:table-cell">${rec.checkName}</td>
+              <td class="p-2 hidden sm:table-cell"></td>
+            </tr>`;
+          });
+        }
+      });
+
+      html += '</tbody></table></div>';
+      container.innerHTML = html;
+
+      container.querySelectorAll('.expense-history-row').forEach(row => {
+        row.addEventListener('click', () => {
+          const key = `${row.dataset.type}-${row.dataset.name}`;
+          expenseHistoryExpanded[key] = !expenseHistoryExpanded[key];
+          renderExpenseHistory();
+        });
+      });
+
+      container.querySelectorAll('.expense-history-cat-select').forEach(sel => {
+        sel.addEventListener('click', e => e.stopPropagation());
+        sel.addEventListener('change', e => {
+          e.stopPropagation();
+          const key = e.target.dataset.key;
+          const newCat = e.target.value;
+          saveOneTimeCategoryOverride(key, newCat);
+          renderExpenseHistory();
+        });
+      });
     }
 
     // ===================== UTILITIES =====================
@@ -3099,7 +3324,7 @@
       document.getElementById('addCheckBtn').onclick = addBiWeeklyCheck;
       document.getElementById('checkLogHistory').addEventListener('input', handleCheckLogInteraction);
       document.getElementById('checkLogHistory').addEventListener('click', handleCheckLogInteraction);
-      document.getElementById('billSearchSelect').addEventListener('change', e => showBillHistory(e.target.value));
+      // Expense history re-renders when time period changes (handled via renderAnalytics -> renderBillSearch)
 
       // Analytics time period
       document.getElementById('historyTimePeriod')?.addEventListener('change', renderAnalytics);

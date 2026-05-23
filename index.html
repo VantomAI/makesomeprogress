@@ -1493,13 +1493,11 @@
       const config = getLlmConfig();
       addLlmMessage('user', text);
       input.value = '';
-      if (config.localFirst !== false) {
-        const localPlan = parseAgentFallback(text, { localOnly: true });
-        if (localPlan.confidence === 'high' && localPlan.actions.length) {
-          const result = await applyAgentActions(localPlan.actions);
-          addLlmMessage('assistant', formatAgentActionReport(localPlan.reply, result));
-          return;
-        }
+      const localPlan = parseAgentFallback(text, { localOnly: true });
+      if (localPlan.confidence === 'high' && localPlan.actions.length) {
+        const result = await applyAgentActions(localPlan.actions);
+        addLlmMessage('assistant', formatAgentActionReport(localPlan.reply, result));
+        return;
       }
       if (!config.apiKey || !getActiveLlmModel(config)) {
         addLlmMessage('assistant', 'I could not confidently handle that locally. Open AI Settings and connect Gemini, Z.AI, or xAI for more flexible requests.');

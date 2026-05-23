@@ -731,7 +731,7 @@
 
   <!-- Settings Modal -->
   <div id="settingsModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-    <div class="modal-content p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+    <div class="modal-content p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
       <h2 class="text-xl font-semibold mb-4 text-white">Settings</h2>
       <div class="space-y-6">
         <div>
@@ -804,6 +804,18 @@
             </div>
           </div>
         </div>
+        <div>
+          <div class="flex items-center justify-between gap-3 mb-3">
+            <h3 class="text-sm font-semibold text-slate-300">AI Activity Logs</h3>
+            <div class="flex gap-2">
+              <button class="btn btn-secondary btn-xs" id="exportAiLogsBtn" type="button">Export JSON</button>
+              <button class="btn btn-danger btn-xs" id="clearAiLogsBtn" type="button">Clear</button>
+            </div>
+          </div>
+          <div class="p-4 rounded-lg bg-slate-950/40 border border-slate-700/50">
+            <div id="aiLogsList" class="max-h-72 overflow-y-auto space-y-2 text-xs"></div>
+          </div>
+        </div>
       </div>
       <div class="flex justify-end mt-6">
         <button class="btn btn-secondary" onclick="hideSettingsModal()">Close</button>
@@ -817,6 +829,8 @@
     const OLD_DASHBOARD_KEY = 'universal-tracker-v2';
     const OLD_CHECKLOG_KEY = 'checklog-app-v1';
     const LLM_CONFIG_KEY = 'make-some-progress-llm-config-v1';
+    const AI_LOG_KEY = 'make-some-progress-ai-logs-v1';
+    const AI_LOG_LIMIT = 200;
 
     let state = {};
     let llmChatHistory = [];
@@ -1124,6 +1138,7 @@
       localStorage.removeItem(LLM_CONFIG_KEY);
       updateLlmSettingsUI();
       updateLlmConnectionStatus();
+      addAiLog('info', 'config_cleared', 'AI provider configuration was cleared.');
       window.showToast('AI disconnected.', 'info');
     }
 
@@ -1176,6 +1191,13 @@
         connectedAt: markConnected ? new Date().toISOString() : (connectionChanged ? '' : previous.connectedAt)
       };
       setLlmConfig(config);
+      addAiLog('info', 'config_saved', `AI settings saved for ${providerLabel(provider)} / ${getActiveLlmModel(config) || 'no model'}.`, {
+        provider,
+        model: getActiveLlmModel(config),
+        efficiencyMode,
+        localFirst,
+        markedLive: !!markConnected
+      });
       return config;
     }
 
@@ -1210,6 +1232,96 @@
 
     function escapeHTML(value) {
       return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+
+    function getAiLogs() {
+      try {
+        const logs = JSON.parse(localStorage.getItem(AI_LOG_KEY) || '[]');
+        return Array.isArray(logs) ? logs : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function addAiLog(level, event, message, details = {}) {
+      try {
+        const entry = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          ts: new Date().toISOString(),
+          level: level || 'info',
+          event: event || 'ai_event',
+          message: String(message || '').slice(0, 500),
+          details: sanitizeAiLogDetails(details)
+        };
+        const logs = [entry, ...getAiLogs()].slice(0, AI_LOG_LIMIT);
+        localStorage.setItem(AI_LOG_KEY, JSON.stringify(logs));
+        renderAiLogs();
+        return entry;
+      } catch (e) {
+        console.warn('AI logging failed:', e);
+        return null;
+      }
+    }
+
+    function sanitizeAiLogDetails(details = {}) {
+      try {
+        return JSON.parse(JSON.stringify(details, (key, value) => {
+          if (/apiKey|password|token|secret/i.test(key)) return '[redacted]';
+          if (typeof value === 'string') return value.slice(0, 1000);
+          return value;
+        }));
+      } catch (e) {
+        return { note: 'Details could not be serialized.' };
+      }
+    }
+
+    function renderAiLogs() {
+      const list = document.getElementById('aiLogsList');
+      if (!list) return;
+      const logs = getAiLogs();
+      if (!logs.length) {
+        list.innerHTML = '<div class="text-slate-500 rounded-lg border border-slate-800 bg-slate-900/50 p-3">No AI activity has been logged yet.</div>';
+        return;
+      }
+      list.innerHTML = logs.map(log => {
+        const color = log.level === 'error' ? 'text-red-300 border-red-500/30 bg-red-950/20' : (log.level === 'warn' ? 'text-amber-300 border-amber-500/30 bg-amber-950/20' : 'text-slate-300 border-slate-700/60 bg-slate-900/60');
+        const details = log.details && Object.keys(log.details).length ? `<pre class="mt-2 whitespace-pre-wrap break-words text-[0.68rem] text-slate-500">${escapeHTML(JSON.stringify(log.details, null, 2))}</pre>` : '';
+        return `
+          <div class="rounded-lg border p-3 ${color}">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <span class="font-semibold">${escapeHTML(log.event)}</span>
+              <span class="text-[0.68rem] text-slate-500">${escapeHTML(formatDateTime(log.ts))}</span>
+            </div>
+            <div class="mt-1 text-slate-300">${escapeHTML(log.message)}</div>
+            ${details}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function clearAiLogs() {
+      localStorage.removeItem(AI_LOG_KEY);
+      renderAiLogs();
+      window.showToast('AI logs cleared.', 'info');
+    }
+
+    function exportAiLogs() {
+      const logs = getAiLogs();
+      const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `make-some-progress-ai-logs-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      addAiLog('info', 'logs_exported', `Exported ${logs.length} AI log entries.`);
+    }
+
+    function formatDateTime(value) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? String(value || '') : date.toLocaleString();
     }
 
     function getAgentSystemPrompt() {
@@ -1420,21 +1532,25 @@
       const btn = document.getElementById('testLlmConfigBtn');
       const config = saveLlmConfigFromUI(false);
       if (!config.apiKey || !getActiveLlmModel(config)) {
+        addAiLog('warn', 'connection_test_skipped', 'AI connection test skipped because API key or model is missing.', { provider: config.provider, model: getActiveLlmModel(config) });
         window.showToast('Add an API key and model first.', 'error');
         return;
       }
       if (btn) { btn.disabled = true; btn.textContent = 'Testing...'; }
       try {
+        addAiLog('info', 'connection_test_started', `Testing ${providerLabel(config.provider)} / ${getActiveLlmModel(config)}.`, { provider: config.provider, model: getActiveLlmModel(config) });
         await callLlm(config, [
           { role: 'system', content: 'Return only {"reply":"connection live","actions":[]}' },
           { role: 'user', content: 'Connection test.' }
         ], true);
         config.connectedAt = new Date().toISOString();
         setLlmConfig(config);
+        addAiLog('info', 'connection_test_success', `AI connection is live for ${providerLabel(config.provider)} / ${getActiveLlmModel(config)}.`, { provider: config.provider, model: getActiveLlmModel(config) });
         window.showToast('AI connection is live.', 'success');
       } catch (err) {
         const failed = { ...config, connectedAt: '' };
         setLlmConfig(failed);
+        addAiLog('error', 'connection_test_failed', err.message || 'AI connection test failed.', { provider: config.provider, model: getActiveLlmModel(config) });
         window.showToast(`AI connection failed: ${err.message}`, 'error');
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Test Live'; }
@@ -1468,6 +1584,7 @@
 
     function addLlmMessage(role, content) {
       llmChatHistory.push({ role, content, ts: new Date().toISOString() });
+      addAiLog('info', role === 'user' ? 'chat_user' : 'chat_assistant', content, { role });
       renderLlmChat();
     }
 
@@ -1495,17 +1612,25 @@
       input.value = '';
       const localPlan = parseAgentFallback(text, { localOnly: true });
       if (localPlan.confidence === 'high' && localPlan.actions.length) {
+        addAiLog('info', 'local_plan_selected', 'High-confidence local agent plan selected.', { confidence: localPlan.confidence, actions: localPlan.actions.map(a => a.type) });
         const result = await applyAgentActions(localPlan.actions);
         addLlmMessage('assistant', formatAgentActionReport(localPlan.reply, result));
         return;
       }
       if (!config.apiKey || !getActiveLlmModel(config)) {
+        addAiLog('warn', 'provider_required', 'Request could not be handled locally and no live provider is configured.', { localConfidence: localPlan.confidence });
         addLlmMessage('assistant', 'I could not confidently handle that locally. Open AI Settings and connect Gemini, Z.AI, or xAI for more flexible requests.');
         return;
       }
       if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
       try {
         const profile = getLlmProfile(config);
+        addAiLog('info', 'llm_request_started', `Sending request to ${providerLabel(config.provider)} / ${getActiveLlmModel(config)}.`, {
+          provider: config.provider,
+          model: getActiveLlmModel(config),
+          efficiencyMode: config.efficiencyMode,
+          historyLimit: profile.historyLimit
+        });
         const raw = await callLlm(config, [
           { role: 'system', content: getAgentSystemPrompt() },
           { role: 'system', content: getAgentContext() },
@@ -1513,11 +1638,18 @@
         ], true);
         const plan = parseAgentResponse(raw);
         const resolvedPlan = resolveAgentPlan(plan, text);
+        addAiLog('info', 'llm_plan_resolved', 'LLM response parsed and resolved into app actions.', {
+          rawActionCount: Array.isArray(plan.actions) ? plan.actions.length : 0,
+          resolvedActionTypes: (resolvedPlan.actions || []).map(a => a.type),
+          usedRepair: resolvedPlan !== plan
+        });
         const result = await applyAgentActions(resolvedPlan.actions || []);
         addLlmMessage('assistant', formatAgentActionReport(resolvedPlan.reply || 'Done.', result));
       } catch (err) {
+        addAiLog('error', 'llm_request_failed', err.message || 'AI request failed.', { provider: config.provider, model: getActiveLlmModel(config) });
         const fallback = parseAgentFallback(text);
         if (fallback.actions.length) {
+          addAiLog('info', 'fallback_after_error', 'Used local fallback after LLM failure.', { confidence: fallback.confidence, actions: fallback.actions.map(a => a.type) });
           const result = await applyAgentActions(fallback.actions);
           addLlmMessage('assistant', formatAgentActionReport(fallback.reply, result));
         } else {
@@ -1773,8 +1905,10 @@
           const action = normalizeAgentAction(rawAction);
           if (!action || typeof action !== 'object') throw new Error('The agent returned an invalid action.');
           if (!action.type) throw new Error('The model did not return a supported app action to run.');
+          addAiLog('info', 'action_started', `Running ${friendlyActionName(action.type)}.`, { type: action.type, action });
           const summary = executeAgentAction(action);
           report.ok.push({ type: action.type, summary });
+          addAiLog('info', 'action_success', summary, { type: action.type, action });
           report.changed = true;
         } catch (err) {
           report.failed.push({
@@ -1782,6 +1916,7 @@
             reason: err.message || 'Unknown action failure.',
             action: rawAction
           });
+          addAiLog('error', 'action_failed', err.message || 'Unknown action failure.', { type: normalizedText(rawAction?.type) || 'app_action', action: rawAction });
         }
       }
       if (report.changed) {
@@ -1792,6 +1927,9 @@
             type: 'cloud_sync',
             reason: cloudResult.reason || 'The local change was saved, but cloud sync did not complete.'
           });
+          addAiLog('warn', 'cloud_sync_failed', cloudResult.reason || 'The local change was saved, but cloud sync did not complete.');
+        } else {
+          addAiLog('info', 'state_saved', 'AI changes were saved locally.', { cloudStatus: cloudResult?.status || 'unknown' });
         }
         renderAll();
       }
@@ -4583,6 +4721,7 @@
     async function showSettingsModal() {
       updateGoogleCalStatus();
       updateLlmSettingsUI();
+      renderAiLogs();
       const modal = document.getElementById('settingsModal');
       modal.classList.remove('hidden'); modal.classList.add('flex');
     }
@@ -5082,9 +5221,13 @@
       document.getElementById('saveLlmConfigBtn')?.addEventListener('click', () => { saveLlmConfigFromUI(false); window.showToast('AI settings saved.', 'success'); });
       document.getElementById('testLlmConfigBtn')?.addEventListener('click', testLlmConnection);
       document.getElementById('clearLlmConfigBtn')?.addEventListener('click', clearLlmConfig);
+      document.getElementById('clearAiLogsBtn')?.addEventListener('click', clearAiLogs);
+      document.getElementById('exportAiLogsBtn')?.addEventListener('click', exportAiLogs);
       document.getElementById('llmChatForm')?.addEventListener('submit', handleLlmChatSubmit);
       document.getElementById('llmFloatForm')?.addEventListener('submit', handleLlmChatSubmit);
       document.querySelectorAll('.ai-chat-input').forEach(input => input.addEventListener('keydown', handleAiChatKeydown));
+      window.addEventListener('error', e => addAiLog('error', 'runtime_error', e.message || 'Runtime error.', { filename: e.filename, lineno: e.lineno, colno: e.colno }));
+      window.addEventListener('unhandledrejection', e => addAiLog('error', 'unhandled_rejection', e.reason?.message || String(e.reason || 'Unhandled promise rejection.')));
       document.getElementById('connectGoogleCalBtn')?.addEventListener('click', connectGoogleCalendar);
       document.getElementById('disconnectGoogleCalBtn')?.addEventListener('click', disconnectGoogleCalendar);
       document.getElementById('syncCalendarBtn')?.addEventListener('click', syncToGoogleCalendar);

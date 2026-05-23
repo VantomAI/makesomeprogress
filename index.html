@@ -1491,10 +1491,6 @@
       const text = input?.value.trim();
       if (!text) return;
       const config = getLlmConfig();
-      if (!config.apiKey || !getActiveLlmModel(config)) {
-        addLlmMessage('assistant', 'Open AI Settings and connect Gemini, Z.AI, or xAI before I can make budget changes.');
-        return;
-      }
       addLlmMessage('user', text);
       input.value = '';
       if (config.localFirst !== false) {
@@ -1504,6 +1500,10 @@
           addLlmMessage('assistant', formatAgentActionReport(localPlan.reply, result));
           return;
         }
+      }
+      if (!config.apiKey || !getActiveLlmModel(config)) {
+        addLlmMessage('assistant', 'I could not confidently handle that locally. Open AI Settings and connect Gemini, Z.AI, or xAI for more flexible requests.');
+        return;
       }
       if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
       try {

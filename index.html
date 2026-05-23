@@ -227,6 +227,56 @@
       border-radius: 0.75rem;
       padding: 1rem 1.25rem;
     }
+    .tile-quick-input {
+      min-height: 34px;
+      padding: 0.35rem 0.5rem;
+      font-size: 0.78rem;
+      border-radius: 0.45rem;
+    }
+    .tile-quick-label {
+      display: block;
+      font-size: 0.68rem;
+      color: #64748b;
+      margin-bottom: 0.25rem;
+    }
+    .tile-quick-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.65rem;
+      margin-top: 0.8rem;
+    }
+
+    /* Floating AI agent */
+    .ai-float {
+      position: fixed;
+      right: 1.25rem;
+      bottom: 1.25rem;
+      z-index: 45;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.75rem;
+      pointer-events: none;
+    }
+    .ai-float-panel {
+      width: min(420px, calc(100vw - 2rem));
+      height: min(640px, calc(100vh - 7rem));
+      display: none;
+      flex-direction: column;
+      pointer-events: auto;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    }
+    .ai-float.open .ai-float-panel { display: flex; animation: fadeInUp 0.18s ease-out forwards; }
+    .ai-float-toggle {
+      pointer-events: auto;
+      width: 3.5rem;
+      height: 3.5rem;
+      border-radius: 9999px;
+      box-shadow: 0 14px 40px rgba(16, 185, 129, 0.35);
+      font-size: 1.2rem;
+    }
+    .ai-float.open .ai-float-toggle { display: none; }
+    .ai-chat-messages { min-height: 0; }
 
     /* Responsive adjustments */
     @media (max-width: 640px) {
@@ -268,6 +318,20 @@
       /* Category breakdown table */
       #categoryBreakdownTable { font-size: 0.75rem; }
       #categoryBreakdownTable th, #categoryBreakdownTable td { padding: 0.375rem 0.25rem; }
+
+      .ai-float {
+        right: 0.75rem;
+        left: 0.75rem;
+        bottom: 0.75rem;
+      }
+      .ai-float-panel {
+        width: 100%;
+        height: min(70vh, 560px);
+      }
+      .ai-float-toggle {
+        width: 3.25rem;
+        height: 3.25rem;
+      }
     }
 
     /* Full-screen modal on mobile for check log editing */
@@ -316,6 +380,7 @@
       <button class="tab-btn" data-tab="calendar-tab">Calendar</button>
       <button class="tab-btn" data-tab="search-tab">Expense History</button>
       <button class="tab-btn" data-tab="mobile-budget-tab">Mobile Budget</button>
+      <button class="tab-btn" data-tab="ai-agent-tab">AI Workspace</button>
     </div>
 
     <div id="tab-contents">
@@ -327,6 +392,47 @@
           <div class="mt-8">
             <h2 class="text-lg font-semibold mb-4 text-slate-300">Latest Expenses</h2>
             <div id="mobile-expense-list" class="rounded-lg"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Agent Tab -->
+      <div id="ai-agent-tab" class="tab-content">
+        <div class="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+          <div class="card p-5 min-h-[620px] flex flex-col">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 class="text-lg font-semibold text-white">Budget Agent</h3>
+                <p id="llmAgentStatus" class="text-xs text-slate-500 mt-1">Configure a provider in Settings to enable chat actions.</p>
+              </div>
+              <button class="btn btn-secondary btn-sm" id="openLlmSettingsBtn">AI Settings</button>
+            </div>
+            <div id="llmChatMessages" class="ai-chat-messages flex-1 overflow-y-auto rounded-lg border border-slate-700/50 bg-slate-950/40 p-3 space-y-3"></div>
+            <form id="llmChatForm" class="ai-chat-form mt-4 flex flex-col sm:flex-row gap-2">
+              <textarea id="llmChatInput" rows="2" placeholder="Tell the agent what to add or update..." class="ai-chat-input flex-1 resize-none"></textarea>
+              <button class="btn btn-primary sm:w-28 ai-send-btn" id="llmSendBtn" type="submit">Send</button>
+            </form>
+          </div>
+          <div class="card p-5">
+            <h4 class="text-sm font-semibold text-slate-300 mb-3">Agent Skills</h4>
+            <div class="space-y-3 text-xs text-slate-400">
+              <div class="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                <p class="font-semibold text-white mb-1">Check Log Expenses</p>
+                <p>Adds, edits, removes, marks paid, and updates paycheck amounts in check logs.</p>
+              </div>
+              <div class="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                <p class="font-semibold text-white mb-1">Recurring Expenses</p>
+                <p>Creates, updates, and removes monthly, weekly, biweekly, quarterly, semiannual, and annual expenses.</p>
+              </div>
+              <div class="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                <p class="font-semibold text-white mb-1">Dashboard + Goals</p>
+                <p>Creates and updates progress, savings, checklist, log, payment, countdown, utilization, and multi-tracker tiles.</p>
+              </div>
+              <div class="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                <p class="font-semibold text-white mb-1">Efficient Context</p>
+                <p>Sends compact app summaries, JSON-only replies, and uses local parsing for simple updates.</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -600,6 +706,29 @@
     </div>
   </div>
 
+  <!-- Floating AI Agent -->
+  <div id="aiFloat" class="ai-float">
+    <div id="aiFloatPanel" class="ai-float-panel modal-content p-4">
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="min-w-0">
+          <h3 class="text-sm font-semibold text-white">Budget Agent</h3>
+          <p id="llmFloatStatus" class="text-xs text-slate-500 mt-0.5">Configure AI in Settings.</p>
+        </div>
+        <div class="flex items-center gap-1">
+          <button class="btn btn-secondary btn-xs" id="aiFloatSettingsBtn" type="button" title="AI Settings">Settings</button>
+          <button class="btn btn-secondary btn-xs" id="aiFloatDockBtn" type="button" title="Open AI workspace">Open</button>
+          <button class="btn btn-danger btn-xs" id="aiFloatCloseBtn" type="button" title="Close">X</button>
+        </div>
+      </div>
+      <div id="llmFloatMessages" class="ai-chat-messages flex-1 overflow-y-auto rounded-lg border border-slate-700/50 bg-slate-950/40 p-3 space-y-3"></div>
+      <form id="llmFloatForm" class="ai-chat-form mt-3 flex gap-2">
+        <textarea id="llmFloatInput" rows="2" placeholder="Ask the agent..." class="ai-chat-input flex-1 resize-none text-sm"></textarea>
+        <button class="btn btn-primary ai-send-btn" id="llmFloatSendBtn" type="submit">Send</button>
+      </form>
+    </div>
+    <button id="aiFloatToggle" class="btn btn-primary ai-float-toggle" type="button" title="Open Budget Agent">AI</button>
+  </div>
+
   <!-- Settings Modal -->
   <div id="settingsModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 backdrop-blur-sm p-4">
     <div class="modal-content p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
@@ -620,6 +749,61 @@
             <button class="btn btn-danger btn-sm w-full mt-2 hidden" id="disconnectGoogleCalBtn">Disconnect</button>
           </div>
         </div>
+        <div>
+          <h3 class="text-sm font-semibold text-slate-300 mb-3">AI Agent</h3>
+          <div class="p-4 rounded-lg bg-slate-800/50 border border-slate-700/50">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-sm text-white font-medium">LLM Connection</span>
+              <span id="llmStatus" class="text-xs text-slate-500">Not connected</span>
+            </div>
+            <div class="space-y-3">
+              <div>
+                <label class="text-xs font-medium text-slate-400 mb-1 block" for="llmProviderSelect">Provider</label>
+                <select id="llmProviderSelect">
+                  <option value="gemini">Google Gemini</option>
+                  <option value="zai">Z.AI</option>
+                  <option value="xai">xAI</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-slate-400 mb-1 block" for="llmModelSelect">Model preset</label>
+                <select id="llmModelSelect"></select>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-slate-400 mb-1 block" for="llmCustomModelInput">Custom model id</label>
+                <input type="text" id="llmCustomModelInput" placeholder="Optional: use any provider model id">
+              </div>
+              <div>
+                <label class="text-xs font-medium text-slate-400 mb-1 block" for="llmApiKeyInput">API key</label>
+                <input type="password" id="llmApiKeyInput" autocomplete="off" placeholder="Stored only in this browser">
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-xs font-medium text-slate-400 mb-1 block" for="llmEfficiencyMode">Efficiency</label>
+                  <select id="llmEfficiencyMode">
+                    <option value="fast">Fast</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="deep">Deep</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-slate-400 mb-1 block" for="llmMaxTokensInput">Output cap</label>
+                  <input type="number" id="llmMaxTokensInput" min="256" max="8192" step="256" value="1536">
+                </div>
+              </div>
+              <label class="flex items-start gap-2 text-xs text-slate-400">
+                <input type="checkbox" id="llmLocalFirstInput" class="mt-0.5">
+                <span>Use instant local handling for obvious budget updates before calling the model.</span>
+              </label>
+              <p class="text-xs text-slate-500">API keys are saved in local browser storage and are not synced to Supabase.</p>
+              <div class="grid grid-cols-2 gap-2">
+                <button class="btn btn-secondary btn-sm" id="saveLlmConfigBtn" type="button">Save</button>
+                <button class="btn btn-primary btn-sm" id="testLlmConfigBtn" type="button">Test Live</button>
+              </div>
+              <button class="btn btn-danger btn-sm w-full" id="clearLlmConfigBtn" type="button">Disconnect AI</button>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="flex justify-end mt-6">
         <button class="btn btn-secondary" onclick="hideSettingsModal()">Close</button>
@@ -632,8 +816,10 @@
     const STORAGE_KEY = 'unified-financial-dashboard-v1';
     const OLD_DASHBOARD_KEY = 'universal-tracker-v2';
     const OLD_CHECKLOG_KEY = 'checklog-app-v1';
+    const LLM_CONFIG_KEY = 'make-some-progress-llm-config-v1';
 
     let state = {};
+    let llmChatHistory = [];
 
     const DEFAULT_STATE = {
       dashboard: { rows: [], tiles: {}, nextRowId: 1, nextTileId: 1, isEditing: false },
@@ -641,6 +827,37 @@
       oneTimeExpenseCategoryOverrides: {},
       calendar: { currentDate: new Date().toISOString() },
       appStates: {}
+    };
+
+    const LLM_PROVIDER_MODELS = {
+      gemini: [
+        { value: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+        { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview' },
+        { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+        { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+        { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite' },
+        { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+        { value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash-Lite' }
+      ],
+      zai: [
+        { value: 'glm-5.1', label: 'GLM-5.1' },
+        { value: 'glm-5', label: 'GLM-5' },
+        { value: 'glm-5-turbo', label: 'GLM-5-Turbo' },
+        { value: 'glm-4.7', label: 'GLM-4.7' },
+        { value: 'glm-4.6', label: 'GLM-4.6' },
+        { value: 'glm-4.5', label: 'GLM-4.5' },
+        { value: 'glm-4-32b-0414-128k', label: 'GLM-4-32B-0414-128K' },
+        { value: 'glm-5v-turbo', label: 'GLM-5V-Turbo' },
+        { value: 'glm-4.6v', label: 'GLM-4.6V' },
+        { value: 'glm-4.5v', label: 'GLM-4.5V' }
+      ],
+      xai: [
+        { value: 'grok-4.3', label: 'Grok 4.3' },
+        { value: 'grok-4', label: 'Grok 4' },
+        { value: 'grok-4-latest', label: 'Grok 4 Latest' },
+        { value: 'grok-3', label: 'Grok 3' },
+        { value: 'grok-3-mini', label: 'Grok 3 Mini' }
+      ]
     };
 
     // ===================== CATEGORIES =====================
@@ -868,6 +1085,1431 @@
       catch (e) { console.error('Failed to save state:', e); }
     }
 
+    // ===================== LLM CONFIG + AGENT =====================
+    function clampNumber(value, min, max, fallback) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.max(min, Math.min(max, n));
+    }
+
+    function getLlmConfig() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(LLM_CONFIG_KEY) || '{}');
+        return {
+          provider: parsed.provider || 'gemini',
+          model: parsed.model || LLM_PROVIDER_MODELS.gemini[0].value,
+          customModel: parsed.customModel || '',
+          apiKey: parsed.apiKey || '',
+          efficiencyMode: parsed.efficiencyMode || 'balanced',
+          maxOutputTokens: clampNumber(parsed.maxOutputTokens, 256, 8192, 1536),
+          localFirst: parsed.localFirst !== false,
+          connectedAt: parsed.connectedAt || ''
+        };
+      } catch (e) {
+        return { provider: 'gemini', model: LLM_PROVIDER_MODELS.gemini[0].value, customModel: '', apiKey: '', efficiencyMode: 'balanced', maxOutputTokens: 1536, localFirst: true, connectedAt: '' };
+      }
+    }
+
+    function getActiveLlmModel(config = getLlmConfig()) {
+      return (config.customModel || config.model || '').trim();
+    }
+
+    function setLlmConfig(config) {
+      localStorage.setItem(LLM_CONFIG_KEY, JSON.stringify(config));
+      updateLlmSettingsUI();
+      updateLlmConnectionStatus();
+    }
+
+    function clearLlmConfig() {
+      localStorage.removeItem(LLM_CONFIG_KEY);
+      updateLlmSettingsUI();
+      updateLlmConnectionStatus();
+      window.showToast('AI disconnected.', 'info');
+    }
+
+    function populateLlmModelSelect(provider, selectedModel) {
+      const select = document.getElementById('llmModelSelect');
+      if (!select) return;
+      const models = LLM_PROVIDER_MODELS[provider] || [];
+      select.innerHTML = models.map(m => `<option value="${m.value}" ${m.value === selectedModel ? 'selected' : ''}>${m.label}</option>`).join('');
+      if (selectedModel && !models.some(m => m.value === selectedModel)) {
+        select.innerHTML += `<option value="${selectedModel}" selected>${selectedModel}</option>`;
+      }
+    }
+
+    function updateLlmSettingsUI() {
+      const config = getLlmConfig();
+      const provider = document.getElementById('llmProviderSelect');
+      const customModel = document.getElementById('llmCustomModelInput');
+      const apiKey = document.getElementById('llmApiKeyInput');
+      const efficiencyMode = document.getElementById('llmEfficiencyMode');
+      const maxTokens = document.getElementById('llmMaxTokensInput');
+      const localFirst = document.getElementById('llmLocalFirstInput');
+      if (provider) provider.value = config.provider;
+      populateLlmModelSelect(config.provider, config.model);
+      if (customModel) customModel.value = config.customModel || '';
+      if (apiKey) apiKey.value = config.apiKey || '';
+      if (efficiencyMode) efficiencyMode.value = config.efficiencyMode || 'balanced';
+      if (maxTokens) maxTokens.value = config.maxOutputTokens || 1536;
+      if (localFirst) localFirst.checked = config.localFirst !== false;
+      updateLlmConnectionStatus();
+    }
+
+    function saveLlmConfigFromUI(markConnected = false) {
+      const provider = document.getElementById('llmProviderSelect')?.value || 'gemini';
+      const model = document.getElementById('llmModelSelect')?.value || LLM_PROVIDER_MODELS[provider]?.[0]?.value || '';
+      const customModel = document.getElementById('llmCustomModelInput')?.value.trim() || '';
+      const apiKey = document.getElementById('llmApiKeyInput')?.value.trim() || '';
+      const efficiencyMode = document.getElementById('llmEfficiencyMode')?.value || 'balanced';
+      const maxOutputTokens = clampNumber(document.getElementById('llmMaxTokensInput')?.value, 256, 8192, 1536);
+      const localFirst = document.getElementById('llmLocalFirstInput')?.checked !== false;
+      const previous = getLlmConfig();
+      const connectionChanged = previous.provider !== provider || previous.model !== model || previous.customModel !== customModel || previous.apiKey !== apiKey;
+      const config = {
+        provider,
+        model,
+        customModel,
+        apiKey,
+        efficiencyMode,
+        maxOutputTokens,
+        localFirst,
+        connectedAt: markConnected ? new Date().toISOString() : (connectionChanged ? '' : previous.connectedAt)
+      };
+      setLlmConfig(config);
+      return config;
+    }
+
+    function updateLlmConnectionStatus() {
+      const config = getLlmConfig();
+      const model = getActiveLlmModel(config);
+      const hasConfig = !!(config.provider && model && config.apiKey);
+      const live = hasConfig && !!config.connectedAt;
+      const label = live ? `Live: ${providerLabel(config.provider)} / ${model}` : (hasConfig ? 'Saved, not tested' : 'Not connected');
+      const status = document.getElementById('llmStatus');
+      const agentStatus = document.getElementById('llmAgentStatus');
+      const floatStatus = document.getElementById('llmFloatStatus');
+      if (status) {
+        status.textContent = label;
+        status.className = live ? 'text-xs text-emerald-400' : (hasConfig ? 'text-xs text-amber-400' : 'text-xs text-slate-500');
+      }
+      if (agentStatus) {
+        agentStatus.textContent = live ? `Connection live with ${model}. ${config.efficiencyMode || 'balanced'} mode is active.` : (hasConfig ? 'AI settings saved. Use Test Live to confirm the connection.' : 'Configure a provider in Settings to enable chat actions.');
+        agentStatus.className = live ? 'text-xs text-emerald-400 mt-1' : (hasConfig ? 'text-xs text-amber-400 mt-1' : 'text-xs text-slate-500 mt-1');
+      }
+      if (floatStatus) {
+        floatStatus.textContent = live ? `${model} ready` : (hasConfig ? 'Saved, not tested' : 'Configure AI in Settings.');
+        floatStatus.className = live ? 'text-xs text-emerald-400 mt-0.5' : (hasConfig ? 'text-xs text-amber-400 mt-0.5' : 'text-xs text-slate-500 mt-0.5');
+      }
+    }
+
+    function providerLabel(provider) {
+      if (provider === 'zai') return 'Z.AI';
+      if (provider === 'xai') return 'xAI';
+      return 'Gemini';
+    }
+
+    function escapeHTML(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+
+    function getAgentSystemPrompt() {
+      const actionSchema = [
+        'add_check_log_expense {name, amount, date?, paid?, category?, checkLogName?}',
+        'update_check_log_expense {name?, matchName?, amount?, date?, paid?, category?, checkLogName?}',
+        'delete_check_log_expense {matchName, checkLogName?}',
+        'set_check_log_amount {amount, checkLogName?}',
+        'create_check_log {name?, startDate?, endDate?, checkAmount?}',
+        'update_check_log {matchName?, id?, name?, startDate?, endDate?, checkAmount?}',
+        'delete_check_log {matchName?, id?, date?}',
+        'add_recurring_expense {name, amount, dueDay?, recurrenceInterval?, category?, firstDueDate?}',
+        'update_recurring_expense {matchName, name?, amount?, dueDay?, recurrenceInterval?, category?, firstDueDate?, type?}',
+        'delete_recurring_expense {matchName}',
+        'mark_recurring_paid {matchName, paidDate?}',
+        'add_one_time_expense {name, amount, date?, category?}',
+        'update_one_time_expense {matchName, name?, amount?, date?, category?}',
+        'delete_one_time_expense {matchName}',
+        'create_dashboard_tile {template, title?, data?, rowTitle?}',
+        'update_dashboard_tile {matchTitle, template?, operation?, field?, amount?, itemName?, data?, addItem?, updateItem?, deleteItem?}',
+        'delete_dashboard_tile {matchTitle}'
+      ].join('; ');
+      return [
+        'You are the Make Some Progress budget agent.',
+        'Your job is to convert user requests into safe app actions. Be terse, deterministic, and efficient.',
+        'Interpret natural conversational wording, not only exact example phrases. Users may say "my check hits", "I get paid", "put money into", "move progress to", "wipe/remove that check", or similar wording.',
+        'Return one strict JSON object only. No markdown, no prose outside JSON, no hidden fields.',
+        'Output schema: {"reply":"short confirmation or one concise clarification","actions":[...]}',
+        'Do not claim an action succeeded in reply. The app will verify actions after execution and append the real success or failure details.',
+        `Allowed actions: ${actionSchema}.`,
+        'If required details are missing, return actions: [] and ask for the one missing detail.',
+        'Prefer one or two actions. Never send duplicate actions. Never include unchanged fields.',
+        'Resolve time references into ISO dates before acting. "today", "yesterday", "tomorrow", "last Friday", "next payday", and similar words belong in date/startDate/paidDate/firstDueDate fields, never in merchant names, bill names, tile titles, or labels.',
+        'For check-log expenses, choose the check log whose startDate/endDate contains the expense date. If the user gives a date phrase, include date:"YYYY-MM-DD" in the action.',
+        'For new checks/paychecks, use create_check_log with startDate and checkAmount. If the user says "add/create a check for DATE for $X", "got paid $X today", or "new check for $X", that is a new check log unless they clearly mean an expense.',
+        'For deleting an entire paycheck/check-log card, use delete_check_log. For deleting only a row inside a check log, use delete_check_log_expense.',
+        'For future check logs, accept future dates like "June 7", "next Friday", or "next payday"; use create_check_log and include checkAmount if known.',
+        'For "I spent", "paid", "bought", or merchant purchases, use add_check_log_expense and set paid=true unless user says planned/unpaid.',
+        'For subscriptions, bills, memberships, due dates, or repeating payments, use add_recurring_expense or update_recurring_expense.',
+        'For one-off future/manual expenses outside check logs, use add_one_time_expense.',
+        'For goals, lists, notes, countdowns, payment logs, utilization, savings, or progress trackers, use create_dashboard_tile/update_dashboard_tile.',
+        'For "saved/added an additional $X toward Y", use update_dashboard_tile with matchTitle:Y, operation:"increment", field:"current", amount:X. This is common for savings/progress tiles.',
+        'For "set Y goal/target to $X", use operation:"set", field:"target", amount:X. For "change current/saved to $X", use field:"current".',
+        'For checklist/log/payment tiles, use addItem/updateItem/deleteItem inside update_dashboard_tile. For utilization or multiTracker, include itemName plus field and amount.',
+        'Dashboard templates: progress, savings, utilization, paymentLog, countdown, checklist, log, multiTracker.',
+        'Recurring intervals: weekly, biweekly, monthly, bimonthly, quarterly, semiannual, annual.',
+        `Valid categories: ${BILL_CATEGORIES.join(', ')}.`,
+        'Infer practical categories when obvious: restaurants are Food & Dining, gym subscriptions are Subscriptions or Health & Medical, utilities are Utilities.',
+        'Use exact existing names from context for matchName/matchTitle whenever possible.',
+        'Do not expose or ask for API keys. Never invent account credentials.',
+        'Only request delete actions when the user clearly asks to remove/delete/cancel something.'
+      ].join('\n');
+    }
+
+    function getAgentContext() {
+      const config = getLlmConfig();
+      const profile = getLlmProfile(config);
+      const today = new Date().toISOString().split('T')[0];
+      const activeLog = findActiveCheckLog(today);
+      const bills = (state.checkTracker?.bills || []).map(b => ({
+        id: b.id,
+        name: b.name,
+        amount: b.amount,
+        dueDay: b.dueDay,
+        category: b.category,
+        firstDueDate: b.firstDueDate,
+        recurrenceInterval: b.recurrenceInterval || 'monthly',
+        type: b.type || 'ongoing'
+      })).slice(0, profile.contextLimit);
+      const logSummary = activeLog ? {
+        id: activeLog.id,
+        name: activeLog.name,
+        startDate: activeLog.startDate,
+        endDate: activeLog.endDate,
+        checkAmount: activeLog.checkAmount || 0,
+        itemCount: activeLog.items?.length || 0,
+        items: (activeLog.items || []).slice(-profile.itemLimit).map(i => ({ id: i.id, bill: i.bill, cost: i.cost, dueDate: i.dueDate, paid: !!i.paid, category: i.category }))
+      } : null;
+      const oneTime = (state.checkTracker?.oneTimeExpenses || []).slice(-profile.itemLimit).map(e => ({ id: e.id, name: e.name, amount: e.amount, date: e.date, category: e.category }));
+      const checkScopes = (state.checkTracker?.checkLogs || []).slice(-profile.contextLimit).map(log => ({
+        id: log.id,
+        name: log.name,
+        startDate: log.startDate || '',
+        endDate: log.endDate || '',
+        checkAmount: log.checkAmount || 0,
+        itemCount: log.items?.length || 0
+      }));
+      const dashboardTiles = Object.values(state.dashboard?.tiles || {}).slice(0, profile.contextLimit).map(t => ({
+        id: t.id,
+        template: t.template,
+        title: t.data?.title || '',
+        summary: getTileAgentSummary(t),
+        dataKeys: Object.keys(t.data || {}).slice(0, 12)
+      }));
+      return [
+        `Today: ${today}.`,
+        `Efficiency: ${config.efficiencyMode || 'balanced'}; keep replies short and actions minimal.`,
+        `Categories: ${BILL_CATEGORIES.join(', ')}.`,
+        `Active check log JSON: ${JSON.stringify(logSummary)}.`,
+        `Check log scopes JSON: ${JSON.stringify(checkScopes)}.`,
+        `Recurring expenses JSON: ${JSON.stringify(bills)}.`,
+        `Manual one-time expenses JSON: ${JSON.stringify(oneTime)}.`,
+        `Dashboard tiles JSON: ${JSON.stringify(dashboardTiles)}.`
+      ].join('\n');
+    }
+
+    function getTileAgentSummary(tile) {
+      const data = tile.data || {};
+      if (['progress', 'savings'].includes(tile.template)) {
+        return { current: Number(data.current) || 0, target: Number(data.target) || 0, unit: data.unit || data.currency || '', targetDate: data.targetDate || '' };
+      }
+      if (tile.template === 'checklist') {
+        return { recurrence: data.recurrence || 'None', items: (data.items || []).slice(-8).map(i => ({ text: i.text, checked: !!i.checked, dueDate: i.dueDate || '' })) };
+      }
+      if (tile.template === 'paymentLog') {
+        return { currency: data.currency || 'USD', payments: (data.payments || []).slice(-8).map(p => ({ description: p.description, amount: p.amount, date: p.date })) };
+      }
+      if (tile.template === 'log') {
+        return { entries: (data.entries || []).slice(0, 8).map(e => ({ text: e.text, timestamp: e.timestamp })) };
+      }
+      if (tile.template === 'countdown') {
+        return { targetDate: data.targetDate || '', description: data.description || '' };
+      }
+      if (tile.template === 'utilization') {
+        return { targetUtil: data.targetUtil || 30, items: (data.items || []).slice(0, 12).map(i => ({ name: i.name, used: i.used, limit: i.limit })) };
+      }
+      if (tile.template === 'multiTracker') {
+        return { items: (data.items || []).slice(0, 12).map(i => ({ name: i.name, current: i.current ?? i.value ?? 0, target: i.target ?? 100, unit: i.unit })) };
+      }
+      return {};
+    }
+
+    function getLlmProfile(config = getLlmConfig()) {
+      const mode = config.efficiencyMode || 'balanced';
+      if (mode === 'fast') return { temperature: 0.05, maxTokens: Math.min(config.maxOutputTokens || 1024, 1024), historyLimit: 4, contextLimit: 24, itemLimit: 12, zaiThinking: 'disabled' };
+      if (mode === 'deep') return { temperature: 0.2, maxTokens: Math.min(config.maxOutputTokens || 3072, 8192), historyLimit: 10, contextLimit: 100, itemLimit: 40, zaiThinking: 'enabled' };
+      return { temperature: 0.1, maxTokens: Math.min(config.maxOutputTokens || 1536, 4096), historyLimit: 6, contextLimit: 60, itemLimit: 20, zaiThinking: 'disabled' };
+    }
+
+    async function callLlm(config, messages, forceJson = true) {
+      const model = getActiveLlmModel(config);
+      if (!config.apiKey || !model) throw new Error('Missing AI provider, model, or API key.');
+      if (config.provider === 'gemini') return callGemini(config, model, messages, forceJson);
+      return callOpenAiCompatible(config, model, messages, forceJson);
+    }
+
+    async function callGemini(config, model, messages, forceJson) {
+      const profile = getLlmProfile(config);
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+      const systemText = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n');
+      const contents = messages.filter(m => m.role !== 'system').map(m => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }]
+      }));
+      const body = {
+        systemInstruction: { parts: [{ text: systemText }] },
+        contents,
+        generationConfig: { temperature: profile.temperature, maxOutputTokens: profile.maxTokens }
+      };
+      if (forceJson) body.generationConfig.responseMimeType = 'application/json';
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) throw new Error(await getReadableApiError(resp));
+      const data = await resp.json();
+      const text = data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+      if (!text) throw new Error('The model returned an empty response.');
+      return text;
+    }
+
+    async function callOpenAiCompatible(config, model, messages, forceJson) {
+      const profile = getLlmProfile(config);
+      const baseUrl = config.provider === 'zai' ? 'https://api.z.ai/api/paas/v4' : 'https://api.x.ai/v1';
+      const body = {
+        model,
+        messages,
+        temperature: profile.temperature,
+        max_tokens: forceJson ? profile.maxTokens : Math.min(profile.maxTokens, 128)
+      };
+      if (forceJson) body.response_format = { type: 'json_object' };
+      if (config.provider === 'zai') body.thinking = { type: profile.zaiThinking };
+      const resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) throw new Error(await getReadableApiError(resp));
+      const data = await resp.json();
+      const content = data.choices?.[0]?.message?.content;
+      if (Array.isArray(content)) return content.map(part => part.text || '').join('');
+      if (!content) throw new Error('The model returned an empty response.');
+      return content;
+    }
+
+    async function getReadableApiError(resp) {
+      const text = await resp.text().catch(() => '');
+      try {
+        const json = JSON.parse(text);
+        return json.error?.message || json.message || `${resp.status} ${resp.statusText}`;
+      } catch (e) {
+        return text ? `${resp.status} ${text.slice(0, 220)}` : `${resp.status} ${resp.statusText}`;
+      }
+    }
+
+    async function testLlmConnection() {
+      const btn = document.getElementById('testLlmConfigBtn');
+      const config = saveLlmConfigFromUI(false);
+      if (!config.apiKey || !getActiveLlmModel(config)) {
+        window.showToast('Add an API key and model first.', 'error');
+        return;
+      }
+      if (btn) { btn.disabled = true; btn.textContent = 'Testing...'; }
+      try {
+        await callLlm(config, [
+          { role: 'system', content: 'Return only {"reply":"connection live","actions":[]}' },
+          { role: 'user', content: 'Connection test.' }
+        ], true);
+        config.connectedAt = new Date().toISOString();
+        setLlmConfig(config);
+        window.showToast('AI connection is live.', 'success');
+      } catch (err) {
+        const failed = { ...config, connectedAt: '' };
+        setLlmConfig(failed);
+        window.showToast(`AI connection failed: ${err.message}`, 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Test Live'; }
+      }
+    }
+
+    function renderLlmChat() {
+      const boxes = document.querySelectorAll('.ai-chat-messages');
+      if (!boxes.length) return;
+      const emptyHTML = `
+        <div class="text-sm text-slate-400 p-3 rounded-lg bg-slate-800/40 border border-slate-700/40">
+          Try: "I spent $40 on McDonalds", "I saved an additional $1000 toward Savings Goal", or "Start a check log for $2400 today."
+        </div>
+      `;
+      if (llmChatHistory.length === 0) {
+        boxes.forEach(box => { box.innerHTML = emptyHTML; });
+        return;
+      }
+      const html = llmChatHistory.map(msg => `
+        <div class="flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}">
+          <div class="max-w-[85%] rounded-lg px-3 py-2 text-sm ${msg.role === 'user' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-200 border border-slate-700/50'}">
+            ${escapeHTML(msg.content)}
+          </div>
+        </div>
+      `).join('');
+      boxes.forEach(box => {
+        box.innerHTML = html;
+        box.scrollTop = box.scrollHeight;
+      });
+    }
+
+    function addLlmMessage(role, content) {
+      llmChatHistory.push({ role, content, ts: new Date().toISOString() });
+      renderLlmChat();
+    }
+
+    function toggleAiFloat(forceOpen = null) {
+      const widget = document.getElementById('aiFloat');
+      if (!widget) return;
+      const shouldOpen = forceOpen === null ? !widget.classList.contains('open') : !!forceOpen;
+      widget.classList.toggle('open', shouldOpen);
+      if (shouldOpen) {
+        renderLlmChat();
+        updateLlmConnectionStatus();
+        setTimeout(() => document.getElementById('llmFloatInput')?.focus(), 80);
+      }
+    }
+
+    async function handleLlmChatSubmit(e) {
+      e.preventDefault();
+      const form = e.target;
+      const input = form?.querySelector('.ai-chat-input') || document.getElementById('llmChatInput');
+      const btn = form?.querySelector('.ai-send-btn') || document.getElementById('llmSendBtn');
+      const text = input?.value.trim();
+      if (!text) return;
+      const config = getLlmConfig();
+      if (!config.apiKey || !getActiveLlmModel(config)) {
+        addLlmMessage('assistant', 'Open AI Settings and connect Gemini, Z.AI, or xAI before I can make budget changes.');
+        return;
+      }
+      addLlmMessage('user', text);
+      input.value = '';
+      if (config.localFirst !== false) {
+        const localPlan = parseAgentFallback(text, { localOnly: true });
+        if (localPlan.confidence === 'high' && localPlan.actions.length) {
+          const result = await applyAgentActions(localPlan.actions);
+          addLlmMessage('assistant', formatAgentActionReport(localPlan.reply, result));
+          return;
+        }
+      }
+      if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
+      try {
+        const profile = getLlmProfile(config);
+        const raw = await callLlm(config, [
+          { role: 'system', content: getAgentSystemPrompt() },
+          { role: 'system', content: getAgentContext() },
+          ...llmChatHistory.slice(-profile.historyLimit).map(m => ({ role: m.role, content: m.content }))
+        ], true);
+        const plan = parseAgentResponse(raw);
+        const resolvedPlan = resolveAgentPlan(plan, text);
+        const result = await applyAgentActions(resolvedPlan.actions || []);
+        addLlmMessage('assistant', formatAgentActionReport(resolvedPlan.reply || 'Done.', result));
+      } catch (err) {
+        const fallback = parseAgentFallback(text);
+        if (fallback.actions.length) {
+          const result = await applyAgentActions(fallback.actions);
+          addLlmMessage('assistant', formatAgentActionReport(fallback.reply, result));
+        } else {
+          addLlmMessage('assistant', `I could not complete that yet: ${err.message}`);
+        }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+      }
+    }
+
+    function handleAiChatKeydown(e) {
+      if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      e.target.closest('form')?.requestSubmit();
+    }
+
+    function parseAgentResponse(raw) {
+      const cleaned = String(raw || '').trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (!parsed || typeof parsed !== 'object') throw new Error('Invalid agent response.');
+      if (!Array.isArray(parsed.actions)) parsed.actions = [];
+      return parsed;
+    }
+
+    function resolveAgentPlan(plan, originalText) {
+      const actions = Array.isArray(plan?.actions) ? plan.actions : [];
+      const runnableActions = actions.map(action => {
+        try {
+          const normalized = normalizeAgentAction(action);
+          return isSupportedAgentAction(normalized) ? normalized : null;
+        } catch (err) {
+          return null;
+        }
+      }).filter(Boolean);
+      if (runnableActions.length) return { ...plan, actions: runnableActions };
+
+      const fallback = parseAgentFallback(originalText, { repairMode: true });
+      if (fallback.actions.length && ['high', 'medium'].includes(fallback.confidence)) return fallback;
+      return { ...plan, actions };
+    }
+
+    function parseAgentFallback(text, options = {}) {
+      const amount = extractMoneyAmount(text);
+      const wantsDelete = /\b(delete|remove|cancel)\b/i.test(text);
+      const wantsUpdate = /\b(update|change|rename|set|mark)\b/i.test(text);
+      const checkLogDeletePlan = parseCheckLogDeleteFallback(text);
+      if (checkLogDeletePlan) return checkLogDeletePlan;
+      if (options.localOnly && (wantsDelete || wantsUpdate)) return { reply: '', actions: [], confidence: 'low' };
+      const dashboardPlan = parseDashboardFallback(text, amount);
+      if (dashboardPlan) return dashboardPlan;
+      const checkLogPlan = parseCheckLogFallback(text, amount);
+      if (checkLogPlan) return checkLogPlan;
+      if (!amount) return { reply: 'I need an amount before I can add that.', actions: [], confidence: 'low' };
+      const dueMatch = text.match(/(?:due|on)\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?/i);
+      const isRecurring = /subscription|monthly|every month|recurring|bill|membership/i.test(text);
+      const cleanName = inferFallbackExpenseName(text, isRecurring);
+      const date = extractDateReference(text) || new Date().toISOString().split('T')[0];
+      if (isRecurring && dueMatch) {
+        return {
+          reply: 'I understood this as a recurring expense.',
+          actions: [{ type: 'add_recurring_expense', name: cleanName || 'New recurring expense', amount, dueDay: parseInt(dueMatch[1]), recurrenceInterval: 'monthly' }],
+          confidence: cleanName ? 'high' : 'medium'
+        };
+      }
+      const hasSpendVerb = /spent|paid|bought|purchased/i.test(text);
+      return {
+        reply: 'I understood this as a check-log expense.',
+        actions: [{ type: 'add_check_log_expense', name: cleanName || 'One-time expense', amount, date, paid: /spent|paid/i.test(text) }],
+        confidence: hasSpendVerb && cleanName ? 'high' : 'medium'
+      };
+    }
+
+    function extractMoneyAmount(text) {
+      const raw = String(text || '');
+      const currencyMatch = raw.match(/\$\s*([\d,]+(?:\.\d{1,2})?)/);
+      if (currencyMatch) return parseFloat(currencyMatch[1].replace(/,/g, ''));
+      const moneyWordMatch = raw.match(/\b([\d,]+(?:\.\d{1,2})?)\s*(?:dollars?|bucks?)\b/i);
+      if (moneyWordMatch) return parseFloat(moneyWordMatch[1].replace(/,/g, ''));
+      const withoutDates = raw
+        .replace(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, ' ')
+        .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ');
+      const plainMatch = withoutDates.match(/\b([\d,]+(?:\.\d{1,2})?)\b/);
+      return plainMatch ? parseFloat(plainMatch[1].replace(/,/g, '')) : null;
+    }
+
+    function parseDashboardFallback(text, amount) {
+      if (!amount) return null;
+      const titleMatch = text.match(/(?:towards?|toward|to|for)\s+["']([^"']+)["']/i) || text.match(/["']([^"']+)["']/);
+      const matchTitle = titleMatch?.[1]?.trim() || findDashboardTitleInText(text);
+      if (!matchTitle) return null;
+      if (/\b(saved|save|saving|contributed|contribution|added|additional|extra|towards?|toward|progress|put|moved|transferred|deposited)\b/i.test(text)) {
+        return {
+          reply: `I understood this as dashboard progress for ${matchTitle}.`,
+          actions: [{ type: 'update_dashboard_tile', matchTitle, operation: 'increment', field: 'current', amount }],
+          confidence: 'high'
+        };
+      }
+      return null;
+    }
+
+    function parseCheckLogFallback(text, amount) {
+      const soundsLikeCheck = /\b(check\s*log|(?:add|create|make|start|new|log)\s+(?:a\s+)?(?:check|paycheck|pay\s*day|payday)|paycheck|pay\s*day|payday|direct\s+deposit|income|got\s+paid|get\s+paid|getting\s+paid|i\s+was\s+paid|my\s+check|check\s+(?:is|was|will\s+be|for|hits?|lands?))\b/i.test(text);
+      const soundsLikeExpense = /\b(spent|bought|purchased|expense|bill|subscription|at)\b/i.test(text) && !/\bpaycheck|direct\s+deposit|income|(?:add|create|make|start|new|log)\s+(?:a\s+)?(?:check|paycheck)|check\s*log|got\s+paid|get\s+paid|getting\s+paid\b/i.test(text);
+      if (!amount || !soundsLikeCheck || soundsLikeExpense) return null;
+      const date = extractDateReference(text) || new Date().toISOString().split('T')[0];
+      return {
+        reply: 'I understood this as a new check log.',
+        actions: [{ type: 'create_check_log', startDate: date, checkAmount: amount }],
+        confidence: 'high'
+      };
+    }
+
+    function findDashboardTitleInText(text) {
+      const haystack = normalizedText(text);
+      if (!haystack) return '';
+      const titles = (state.dashboard.tiles || [])
+        .map(tile => tile.data?.title || tile.rowTitle || '')
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length);
+      const match = titles.find(title => {
+        const normalizedTitle = normalizedText(title);
+        if (!normalizedTitle) return false;
+        if (haystack.includes(normalizedTitle)) return true;
+        return normalizedTitle.split(/\s+/).filter(Boolean).every(token => haystack.includes(token));
+      });
+      return match || '';
+    }
+
+    function parseCheckLogDeleteFallback(text) {
+      const isDelete = /\b(delete|remove|cancel)\b/i.test(text);
+      const isCheckLog = /\b(check\s*log|paycheck|pay\s*day|payday|check)\b/i.test(text);
+      if (!isDelete || !isCheckLog) return null;
+      const date = extractDateReference(text);
+      const quoted = text.match(/["']([^"']+)["']/)?.[1];
+      const latest = /\b(latest|last|most recent|current)\b/i.test(text);
+      return {
+        reply: 'I understood this as deleting a check log.',
+        actions: [{ type: 'delete_check_log', matchName: quoted || (latest ? 'latest' : ''), date }],
+        confidence: date || quoted || latest ? 'high' : 'medium'
+      };
+    }
+
+    function getDateLanguageRegex() {
+      return /\b(today|tonight|yesterday|tomorrow|last\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday|week|month)|next\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday|week|month)|this\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday|week|month)|(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)|(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\s+\d{1,2}(?:st|nd|rd|th)?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/gi;
+    }
+
+    function sanitizeExpenseName(name) {
+      return String(name || '')
+        .replace(getDateLanguageRegex(), ' ')
+        .replace(/\b(on|at|for|today|yesterday|tomorrow)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function extractDateReference(text, baseDate = new Date()) {
+      const raw = String(text || '').toLowerCase();
+      if (/\b(next|future|upcoming)\s+(paycheck|payday|check)\b|\bnext\s+payday\b|\bnext\s+check\b/.test(raw)) return getNextCheckStartDate();
+      const iso = raw.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];
+      if (iso) return normalizeDateString(iso);
+      const slash = raw.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+      if (slash) {
+        const year = slash[3] ? normalizeYear(slash[3]) : baseDate.getFullYear();
+        return formatDateYMD(new Date(year, Number(slash[1]) - 1, Number(slash[2])));
+      }
+      if (/\byesterday\b/.test(raw)) return dateOffsetYMD(baseDate, -1);
+      if (/\btomorrow\b/.test(raw)) return dateOffsetYMD(baseDate, 1);
+      if (/\btoday\b|\btonight\b/.test(raw)) return dateOffsetYMD(baseDate, 0);
+
+      const weekdayMatch = raw.match(/\b(?:(last|next|this)\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+      if (weekdayMatch) return weekdayToDate(weekdayMatch[2], weekdayMatch[1] || 'this', baseDate);
+
+      const monthMatch = raw.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,\s*(\d{4}))?\b/i);
+      if (monthMatch) {
+        const month = monthNameToIndex(monthMatch[1]);
+        const day = Number(monthMatch[2]);
+        let year = monthMatch[3] ? Number(monthMatch[3]) : baseDate.getFullYear();
+        let d = new Date(year, month, day);
+        if (!monthMatch[3] && d < stripTime(baseDate)) d = new Date(year + 1, month, day);
+        return formatDateYMD(d);
+      }
+      return '';
+    }
+
+    function getNextCheckStartDate() {
+      const logs = state.checkTracker?.checkLogs || [];
+      if (!logs.length) return new Date().toISOString().split('T')[0];
+      const sorted = [...logs].filter(l => l.startDate || l.endDate).sort((a, b) => {
+        const aDate = new Date((a.startDate || a.endDate) + 'T00:00:00');
+        const bDate = new Date((b.startDate || b.endDate) + 'T00:00:00');
+        return bDate - aDate;
+      });
+      const latest = sorted[0];
+      if (!latest) return new Date().toISOString().split('T')[0];
+      const base = latest.endDate ? new Date(latest.endDate + 'T00:00:00') : new Date(latest.startDate + 'T00:00:00');
+      base.setDate(base.getDate() + (latest.endDate ? 1 : 14));
+      return formatDateYMD(base);
+    }
+
+    function normalizeYear(yearText) {
+      const y = Number(yearText);
+      return y < 100 ? 2000 + y : y;
+    }
+
+    function dateOffsetYMD(baseDate, days) {
+      const d = stripTime(baseDate);
+      d.setDate(d.getDate() + days);
+      return formatDateYMD(d);
+    }
+
+    function stripTime(date) {
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    }
+
+    function weekdayToDate(dayName, modifier, baseDate) {
+      const names = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const target = names.indexOf(dayName.toLowerCase());
+      const base = stripTime(baseDate);
+      let diff = target - base.getDay();
+      if (modifier === 'next' && diff <= 0) diff += 7;
+      if (modifier === 'last' && diff >= 0) diff -= 7;
+      const d = new Date(base);
+      d.setDate(base.getDate() + diff);
+      return formatDateYMD(d);
+    }
+
+    function monthNameToIndex(name) {
+      const short = name.toLowerCase().slice(0, 3);
+      return ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(short);
+    }
+
+    function inferFallbackExpenseName(text, isRecurring) {
+      let match;
+      if (isRecurring) {
+        match = text.match(/(?:add\s+(?:a\s+new\s+)?|new\s+)?(.+?)(?:\s+for\s+\$?\s*\d|\s+that\s+is\s+due|\s+due\s+on|\s+due\s+the|$)/i);
+      } else {
+        match = text.match(/(?:spent|paid|bought|purchased).+?(?:\s+on\s+|\s+at\s+|\s+for\s+)(.+?)(?:\s+for\s+\$?\s*\d|$)/i);
+      }
+      const raw = (match?.[1] || text)
+        .replace(/\$\s*\d+(?:\.\d{1,2})?/g, ' ')
+        .replace(/\b(i|spent|paid|bought|purchased|add|a|new|for|that|is|due|on|the|of|every|month|monthly|recurring|bill|membership)\b/gi, ' ')
+        .replace(/\bsubscription\b/gi, ' ')
+        .replace(getDateLanguageRegex(), ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return sanitizeExpenseName(raw);
+    }
+
+    async function applyAgentActions(actions) {
+      const report = { ok: [], failed: [], changed: false, attempted: 0 };
+      for (const rawAction of actions) {
+        report.attempted++;
+        try {
+          const action = normalizeAgentAction(rawAction);
+          if (!action || typeof action !== 'object') throw new Error('The agent returned an invalid action.');
+          if (!action.type) throw new Error('The model did not return a supported app action to run.');
+          const summary = executeAgentAction(action);
+          report.ok.push({ type: action.type, summary });
+          report.changed = true;
+        } catch (err) {
+          report.failed.push({
+            type: normalizedText(rawAction?.type) || 'app_action',
+            reason: err.message || 'Unknown action failure.',
+            action: rawAction
+          });
+        }
+      }
+      if (report.changed) {
+        saveState();
+        const cloudResult = await saveDataToCloud({ silent: true });
+        if (cloudResult?.status === 'error') {
+          report.failed.push({
+            type: 'cloud_sync',
+            reason: cloudResult.reason || 'The local change was saved, but cloud sync did not complete.'
+          });
+        }
+        renderAll();
+      }
+      return report;
+    }
+
+    function executeAgentAction(action) {
+      if (!action.type) throw new Error('The model did not return a supported app action to run.');
+      if (!isSupportedAgentAction(action)) throw new Error(`Unsupported action "${action.type}".`);
+      if (action.type === 'add_check_log_expense') return addCheckLogExpenseFromAgent(action);
+      if (action.type === 'update_check_log_expense') return updateCheckLogExpenseFromAgent(action);
+      if (action.type === 'delete_check_log_expense') return deleteCheckLogExpenseFromAgent(action);
+      if (action.type === 'set_check_log_amount') return setCheckLogAmountFromAgent(action);
+      if (action.type === 'create_check_log') return createCheckLogFromAgent(action);
+      if (action.type === 'update_check_log') return updateCheckLogFromAgent(action);
+      if (action.type === 'delete_check_log') return deleteCheckLogFromAgent(action);
+      if (action.type === 'add_recurring_expense') return addRecurringExpenseFromAgent(action);
+      if (action.type === 'update_recurring_expense') return updateRecurringExpenseFromAgent(action);
+      if (action.type === 'delete_recurring_expense') return deleteRecurringExpenseFromAgent(action);
+      if (action.type === 'mark_recurring_paid') return markRecurringPaidFromAgent(action);
+      if (action.type === 'add_one_time_expense') return addOneTimeExpenseFromAgent(action);
+      if (action.type === 'update_one_time_expense') return updateOneTimeExpenseFromAgent(action);
+      if (action.type === 'delete_one_time_expense') return deleteOneTimeExpenseFromAgent(action);
+      if (action.type === 'create_dashboard_tile') return createDashboardTileFromAgent(action);
+      if (action.type === 'update_dashboard_tile') return updateDashboardTileFromAgent(action);
+      if (action.type === 'delete_dashboard_tile') return deleteDashboardTileFromAgent(action);
+      throw new Error(`Unsupported action "${action.type}".`);
+    }
+
+    function isSupportedAgentAction(action) {
+      return !!action && [
+        'add_check_log_expense',
+        'update_check_log_expense',
+        'delete_check_log_expense',
+        'set_check_log_amount',
+        'create_check_log',
+        'update_check_log',
+        'delete_check_log',
+        'add_recurring_expense',
+        'update_recurring_expense',
+        'delete_recurring_expense',
+        'mark_recurring_paid',
+        'add_one_time_expense',
+        'update_one_time_expense',
+        'delete_one_time_expense',
+        'create_dashboard_tile',
+        'update_dashboard_tile',
+        'delete_dashboard_tile'
+      ].includes(action.type);
+    }
+
+    function formatAgentActionReport(reply, report) {
+      const intro = String(reply || '').trim();
+      if (!report) return 'I could not verify whether that worked.';
+      const okText = report.ok?.map(r => r.summary).filter(Boolean) || [];
+      const failText = (report.failed || []).map(f => `I could not ${friendlyActionName(f.type)}: ${f.reason}`);
+      if (okText.length && failText.length) return `Completed: ${okText.join(' ')} Issues: ${failText.join(' ')}`.trim();
+      if (okText.length) return okText.join(' ').trim();
+      if (failText.length) return `Nothing was changed. ${failText.join(' ')}`.trim();
+      if (intro && (/\?/.test(intro) || /\b(need|missing|which|what|when|where|who|how)\b/i.test(intro))) return intro;
+      return 'Nothing was changed because no supported app action was returned.';
+    }
+
+    function friendlyActionName(type) {
+      if (type === 'app_action') return 'complete that action';
+      if (type === 'cloud_sync') return 'sync the change to cloud';
+      const words = normalizedText(type || 'that action').replace(/_/g, ' ');
+      return words || 'that action';
+    }
+
+    function normalizeAgentAction(action) {
+      if (!action || typeof action !== 'object') return null;
+      const normalized = { ...action };
+      const rawType = normalizedText(action.type).replace(/[\s-]+/g, '_');
+      const typeMap = {
+        add_expense: 'add_check_log_expense',
+        add_check_expense: 'add_check_log_expense',
+        add_transaction: 'add_check_log_expense',
+        add_check: 'create_check_log',
+        create_check: 'create_check_log',
+        new_check: 'create_check_log',
+        create_paycheck: 'create_check_log',
+        create_paycheck_log: 'create_check_log',
+        add_check_log: 'create_check_log',
+        add_paycheck_log: 'create_check_log',
+        set_paycheck_amount: 'set_check_log_amount',
+        update_paycheck: 'update_check_log',
+        update_paycheck_log: 'update_check_log',
+        remove_check_log: 'delete_check_log',
+        remove_paycheck: 'delete_check_log',
+        delete_paycheck: 'delete_check_log',
+        delete_paycheck_log: 'delete_check_log',
+        dashboard_update: 'update_dashboard_tile',
+        update_goal: 'update_dashboard_tile',
+        update_savings_goal: 'update_dashboard_tile',
+        add_goal_progress: 'update_dashboard_tile'
+      };
+      normalized.type = typeMap[rawType] || rawType;
+      if (!normalized.type && (normalized.checkAmount !== undefined || normalized.startDate) && (normalized.amount !== undefined || normalized.checkAmount !== undefined)) normalized.type = 'create_check_log';
+      if (!normalized.type && (normalized.matchTitle || normalized.tileName)) normalized.type = 'update_dashboard_tile';
+      if (normalized.checkAmount === undefined && normalized.amount !== undefined && normalized.type === 'create_check_log') normalized.checkAmount = normalized.amount;
+      if (!normalized.matchTitle && normalized.tileName) normalized.matchTitle = normalized.tileName;
+      if (!normalized.matchTitle && normalized.goalName) normalized.matchTitle = normalized.goalName;
+      if (!normalized.matchTitle && normalized.dashboardName) normalized.matchTitle = normalized.dashboardName;
+      if (!normalized.template && normalized.tileType) normalized.template = normalizeDashboardTemplate(normalized.tileType);
+      if (normalized.template) normalized.template = normalizeDashboardTemplate(normalized.template);
+      if (!normalized.matchTitle && normalized.title && normalized.type === 'update_dashboard_tile') normalized.matchTitle = normalized.title;
+      if (!normalized.matchName && normalized.checkLogName && ['delete_check_log', 'update_check_log'].includes(normalized.type)) normalized.matchName = normalized.checkLogName;
+      return normalized;
+    }
+
+    function normalizeDashboardTemplate(value) {
+      const raw = normalizedText(value).replace(/[\s_-]+/g, '');
+      const map = {
+        progress: 'progress',
+        progresstracker: 'progress',
+        savings: 'savings',
+        saving: 'savings',
+        savingsgoal: 'savings',
+        goal: 'savings',
+        utilization: 'utilization',
+        creditutilization: 'utilization',
+        paymentlog: 'paymentLog',
+        payments: 'paymentLog',
+        countdown: 'countdown',
+        checklist: 'checklist',
+        todo: 'checklist',
+        log: 'log',
+        note: 'log',
+        multitracker: 'multiTracker',
+        metric: 'multiTracker'
+      };
+      return map[raw] || value;
+    }
+
+    function findActiveCheckLog(dateStr) {
+      const logs = state.checkTracker?.checkLogs || [];
+      if (!logs.length) return null;
+      const active = logs.find(log => log.startDate && log.endDate && dateStr >= log.startDate && dateStr <= log.endDate);
+      if (active) return active;
+      const target = new Date((dateStr || new Date().toISOString().split('T')[0]) + 'T00:00:00');
+      const datedLogs = logs.filter(log => log.startDate || log.endDate);
+      if (datedLogs.length) {
+        return [...datedLogs].sort((a, b) => {
+          const aDate = new Date((a.startDate || a.endDate) + 'T00:00:00');
+          const bDate = new Date((b.startDate || b.endDate) + 'T00:00:00');
+          return Math.abs(aDate - target) - Math.abs(bDate - target);
+        })[0];
+      }
+      return [...logs].sort((a, b) => (b.id || 0) - (a.id || 0))[0] || null;
+    }
+
+    function addCheckLogExpenseFromAgent(action) {
+      const name = sanitizeExpenseName(action.name || 'One-time expense') || 'One-time expense';
+      const amount = Math.max(0, Number(action.amount) || 0);
+      if (!amount) throw new Error('A check-log expense needs an amount.');
+      const date = resolveAgentDate(action.date || action.when || action.timeReference) || new Date().toISOString().split('T')[0];
+      const category = action.category ? migrateCategory(action.category) : autoCategorizeOneTime(name);
+      let log = action.checkLogName ? findCheckLogByName(action.checkLogName) : findActiveCheckLog(date);
+      if (!log) {
+        const logs = state.checkTracker.checkLogs;
+        const start = new Date(date + 'T00:00:00');
+        const end = new Date(start); end.setDate(end.getDate() + 13);
+        const newId = logs.length > 0 ? Math.max(...logs.map(l => l.id || 0)) + 1 : 1;
+        log = {
+          id: newId,
+          name: `AI Check ${newId}`,
+          month: start.getMonth() + 1,
+          year: start.getFullYear(),
+          items: [],
+          sortBy: 'bill',
+          sortOrder: 'asc',
+          startDate: formatDateYMD(start),
+          endDate: formatDateYMD(end),
+          checkAmount: 0
+        };
+        logs.push(log);
+      }
+      const newItemId = log.items.length > 0 ? Math.max(...log.items.map(i => i.id || 0)) + 1 : 1;
+      log.items.push({
+        id: newItemId,
+        bill: name,
+        cost: amount,
+        category,
+        dueDate: date,
+        paid: action.paid !== false
+      });
+      return `Added ${formatCurrency(amount)} for ${name} to ${log.name}.`;
+    }
+
+    function updateCheckLogExpenseFromAgent(action) {
+      const found = findCheckLogItem(action.matchName || action.name, action.checkLogName);
+      if (!found) throw new Error('Could not find that check-log expense.');
+      const { log, item } = found;
+      const oldName = item.bill || 'expense';
+      if (action.name) item.bill = sanitizeExpenseName(action.name) || item.bill;
+      if (action.amount !== undefined) item.cost = Math.max(0, Number(action.amount) || 0);
+      if (action.date) item.dueDate = resolveAgentDate(action.date) || item.dueDate;
+      if (action.paid !== undefined) item.paid = !!action.paid;
+      if (action.category) item.category = migrateCategory(action.category);
+      return `Updated ${oldName} in ${log.name}.`;
+    }
+
+    function deleteCheckLogExpenseFromAgent(action) {
+      const found = findCheckLogItem(action.matchName || action.name, action.checkLogName);
+      if (!found) throw new Error('Could not find that check-log expense.');
+      found.log.items = found.log.items.filter(i => i !== found.item);
+      return `Removed ${found.item.bill || 'expense'} from ${found.log.name}.`;
+    }
+
+    function setCheckLogAmountFromAgent(action) {
+      const log = findCheckLogFromAgent(action) || findActiveCheckLog(new Date().toISOString().split('T')[0]);
+      if (!log) throw new Error('No check log is available.');
+      log.checkAmount = Math.max(0, Number(action.amount) || 0);
+      return `Set ${log.name} check amount to ${formatCurrency(log.checkAmount)}.`;
+    }
+
+    function createCheckLogFromAgent(action) {
+      const startDate = resolveAgentDate(action.startDate || action.paycheckDate || action.date || action.when) || getNextCheckStartDate();
+      const start = new Date(startDate + 'T00:00:00');
+      const endDate = resolveAgentDate(action.endDate) || formatDateYMD(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 13));
+      const logs = state.checkTracker.checkLogs;
+      const newId = logs.length > 0 ? Math.max(...logs.map(l => l.id || 0)) + 1 : 1;
+      const log = {
+        id: newId,
+        name: String(action.name || `Check ${logs.length + 1}`).trim(),
+        month: start.getMonth() + 1,
+        year: start.getFullYear(),
+        items: [],
+        sortBy: 'bill',
+        sortOrder: 'asc',
+        startDate,
+        endDate,
+        checkAmount: Math.max(0, Number(action.checkAmount ?? action.amount) || 0)
+      };
+      syncBillsIntoCheckLog(log);
+      logs.push(log);
+      return `Created ${log.name}.`;
+    }
+
+    function updateCheckLogFromAgent(action) {
+      const log = findCheckLogFromAgent(action);
+      if (!log) throw new Error('Could not find that check log.');
+      if (action.name) log.name = String(action.name).trim();
+      if (action.startDate) {
+        log.startDate = resolveAgentDate(action.startDate) || log.startDate;
+        if (log.startDate) {
+          const start = new Date(log.startDate + 'T00:00:00');
+          log.month = start.getMonth() + 1;
+          log.year = start.getFullYear();
+        }
+      }
+      if (action.endDate) log.endDate = resolveAgentDate(action.endDate) || log.endDate;
+      if (action.checkAmount !== undefined || action.amount !== undefined) log.checkAmount = Math.max(0, Number(action.checkAmount ?? action.amount) || 0);
+      if (action.syncBills !== false) syncBillsIntoCheckLog(log);
+      return `Updated ${log.name}.`;
+    }
+
+    function deleteCheckLogFromAgent(action) {
+      const log = findCheckLogFromAgent(action);
+      if (!log) throw new Error('Could not find that check log.');
+      state.checkTracker.checkLogs = state.checkTracker.checkLogs.filter(l => l !== log);
+      return `Deleted ${log.name}.`;
+    }
+
+    function addRecurringExpenseFromAgent(action) {
+      const name = String(action.name || 'New recurring expense').trim();
+      const amount = Math.max(0, Number(action.amount) || 0);
+      if (!amount) throw new Error('A recurring expense needs an amount.');
+      const dueDay = Math.max(1, Math.min(31, parseInt(action.dueDay) || dayFromDate(action.firstDueDate) || 1));
+      const recurrenceInterval = normalizeRecurrenceInterval(action.recurrenceInterval);
+      const firstDueDate = resolveAgentDate(action.firstDueDate) || nextDueDateForDay(dueDay);
+      const category = action.category ? migrateCategory(action.category) : autoCategorizeOneTime(name);
+      const bills = state.checkTracker.bills;
+      const existing = bills.find(b => (b.name || '').toLowerCase().trim() === name.toLowerCase());
+      const bill = existing || { id: bills.length > 0 ? Math.max(...bills.map(b => b.id || 0)) + 1 : 1 };
+      Object.assign(bill, {
+        name,
+        amount,
+        dueDay,
+        type: 'ongoing',
+        category,
+        firstDueDate,
+        recurrenceInterval
+      });
+      if (!existing) bills.push(bill);
+      syncRecurringBillIntoOpenLogs(bill);
+      return `${existing ? 'Updated' : 'Added'} recurring ${name} for ${formatCurrency(amount)} due day ${dueDay}.`;
+    }
+
+    function updateRecurringExpenseFromAgent(action) {
+      const bill = findRecurringBill(action.matchName || action.name);
+      if (!bill) throw new Error('Could not find that recurring expense.');
+      const oldName = bill.name;
+      if (action.name) bill.name = String(action.name).trim();
+      if (action.amount !== undefined) bill.amount = Math.max(0, Number(action.amount) || 0);
+      if (action.dueDay !== undefined) bill.dueDay = Math.max(1, Math.min(31, parseInt(action.dueDay) || bill.dueDay || 1));
+      if (action.firstDueDate) bill.firstDueDate = resolveAgentDate(action.firstDueDate) || bill.firstDueDate;
+      if (action.recurrenceInterval) bill.recurrenceInterval = normalizeRecurrenceInterval(action.recurrenceInterval);
+      if (action.category) bill.category = migrateCategory(action.category);
+      if (action.type) bill.type = ['ongoing', 'limited'].includes(action.type) ? action.type : bill.type;
+      syncRecurringBillIntoOpenLogs(bill);
+      updateHistoricalBillItems(oldName, bill);
+      if (bill.gcalEventId && getGoogleCalToken()) updateGcalEvent(bill);
+      return `Updated recurring ${oldName}.`;
+    }
+
+    function deleteRecurringExpenseFromAgent(action) {
+      const bill = findRecurringBill(action.matchName || action.name);
+      if (!bill) throw new Error('Could not find that recurring expense.');
+      if (bill.gcalEventId) deleteGcalEvent(bill.gcalEventId);
+      state.checkTracker.bills = state.checkTracker.bills.filter(b => b !== bill);
+      return `Removed recurring ${bill.name}.`;
+    }
+
+    function markRecurringPaidFromAgent(action) {
+      const bill = findRecurringBill(action.matchName || action.name);
+      if (!bill) throw new Error('Could not find that recurring expense.');
+      bill.lastPaidDate = resolveAgentDate(action.paidDate) || new Date().toISOString().split('T')[0];
+      return `Marked ${bill.name} paid for ${formatDateForDisplay(bill.lastPaidDate)}.`;
+    }
+
+    function addOneTimeExpenseFromAgent(action) {
+      const name = String(action.name || 'One-time expense').trim();
+      const amount = Math.max(0, Number(action.amount) || 0);
+      if (!amount) throw new Error('A one-time expense needs an amount.');
+      const exp = {
+        id: Date.now(),
+        name,
+        amount,
+        date: resolveAgentDate(action.date) || new Date().toISOString().split('T')[0],
+        category: action.category ? migrateCategory(action.category) : autoCategorizeOneTime(name)
+      };
+      state.checkTracker.oneTimeExpenses.push(exp);
+      return `Added one-time ${name} for ${formatCurrency(amount)}.`;
+    }
+
+    function updateOneTimeExpenseFromAgent(action) {
+      const exp = findOneTimeExpense(action.matchName || action.name);
+      if (!exp) throw new Error('Could not find that one-time expense.');
+      const oldName = exp.name;
+      if (action.name) exp.name = String(action.name).trim();
+      if (action.amount !== undefined) exp.amount = Math.max(0, Number(action.amount) || 0);
+      if (action.date) exp.date = resolveAgentDate(action.date) || exp.date;
+      if (action.category) exp.category = migrateCategory(action.category);
+      return `Updated one-time ${oldName}.`;
+    }
+
+    function deleteOneTimeExpenseFromAgent(action) {
+      const exp = findOneTimeExpense(action.matchName || action.name);
+      if (!exp) throw new Error('Could not find that one-time expense.');
+      state.checkTracker.oneTimeExpenses = state.checkTracker.oneTimeExpenses.filter(e => e !== exp);
+      return `Removed one-time ${exp.name}.`;
+    }
+
+    function createDashboardTileFromAgent(action) {
+      const template = templates[action.template] ? action.template : 'log';
+      const data = sanitizeTileData(template, { ...(action.data || {}), title: action.title || action.data?.title });
+      const tileId = state.dashboard.nextTileId++;
+      state.dashboard.tiles[tileId] = { id: tileId, template, data, created: new Date().toISOString() };
+      let row = state.dashboard.rows[state.dashboard.rows.length - 1];
+      if (!row || action.rowTitle) {
+        row = { id: state.dashboard.nextRowId++, layout: 'auto', tileIds: [] };
+        state.dashboard.rows.push(row);
+      }
+      row.tileIds.push(tileId);
+      return `Created ${templates[template].name} tile "${data.title || 'Untitled'}".`;
+    }
+
+    function updateDashboardTileFromAgent(action) {
+      const tile = findDashboardTile(action.matchTitle || action.title, action.template);
+      if (!tile) throw new Error('Could not find that dashboard tile.');
+      applySemanticTileUpdate(tile, action);
+      return `Updated dashboard tile "${tile.data.title || 'Untitled'}".`;
+    }
+
+    function deleteDashboardTileFromAgent(action) {
+      const tile = findDashboardTile(action.matchTitle || action.title);
+      if (!tile) throw new Error('Could not find that dashboard tile.');
+      for (const row of state.dashboard.rows) row.tileIds = row.tileIds.filter(id => id !== tile.id);
+      delete state.dashboard.tiles[tile.id];
+      return `Removed dashboard tile "${tile.data?.title || 'Untitled'}".`;
+    }
+
+    function syncRecurringBillIntoOpenLogs(bill) {
+      (state.checkTracker.checkLogs || []).forEach(log => {
+        if (!log.startDate || !log.endDate) return;
+        const due = getNextDueDate(bill.firstDueDate, bill.recurrenceInterval, new Date(log.startDate + 'T00:00:00'));
+        if (!due) return;
+        const dueStr = formatDateYMD(due);
+        if (dueStr < log.startDate || dueStr > log.endDate) return;
+        const exists = log.items.some(item => (item.bill || '').toLowerCase().trim() === (bill.name || '').toLowerCase().trim() && item.dueDate === dueStr);
+        if (exists) return;
+        const newItemId = log.items.length > 0 ? Math.max(...log.items.map(i => i.id || 0)) + 1 : 1;
+        log.items.push({ id: newItemId, bill: bill.name, cost: bill.amount, category: bill.category || 'Other', dueDate: dueStr, paid: false });
+      });
+    }
+
+    function syncBillsIntoCheckLog(log) {
+      (state.checkTracker.bills || []).forEach(bill => {
+        const due = bill.firstDueDate && bill.recurrenceInterval
+          ? getNextDueDate(bill.firstDueDate, bill.recurrenceInterval, new Date(log.startDate + 'T00:00:00'))
+          : new Date(new Date(log.startDate + 'T00:00:00').getFullYear(), new Date(log.startDate + 'T00:00:00').getMonth(), bill.dueDay || 1);
+        if (!due) return;
+        const dueStr = formatDateYMD(due);
+        if (dueStr < log.startDate || dueStr > log.endDate) return;
+        const exists = log.items.some(item => textMatches(item.bill, bill.name) && item.dueDate === dueStr);
+        if (exists) return;
+        const newItemId = log.items.length > 0 ? Math.max(...log.items.map(i => i.id || 0)) + 1 : 1;
+        log.items.push({ id: newItemId, bill: bill.name, cost: bill.amount, category: bill.category || 'Other', dueDate: dueStr, paid: false });
+      });
+    }
+
+    function applySemanticTileUpdate(tile, action) {
+      const data = { ...tile.data, ...(action.data || {}) };
+      normalizeDashboardAliases(data, action);
+      const amount = getActionAmount(action);
+      const operation = normalizedText(action.operation || (action.delta || action.currentDelta || action.amountDelta ? 'increment' : 'set'));
+      const field = normalizeTileField(action.field || action.data?.field || inferTileField(tile, action));
+
+      if (['progress', 'savings'].includes(tile.template) && amount !== null && ['current', 'target'].includes(field)) {
+        data[field] = applyNumericOperation(Number(data[field]) || 0, amount, operation);
+      }
+      if (['progress', 'savings'].includes(tile.template)) {
+        if (action.current !== undefined || action.data?.current !== undefined) data.current = Number(action.current ?? action.data.current) || 0;
+        if (action.target !== undefined || action.data?.target !== undefined) data.target = Number(action.target ?? action.data.target) || 0;
+        if (action.saved !== undefined || action.data?.saved !== undefined) data.current = Number(action.saved ?? action.data.saved) || 0;
+        if (action.goal !== undefined || action.data?.goal !== undefined) data.target = Number(action.goal ?? action.data.goal) || 0;
+      }
+
+      if (action.currentDelta !== undefined) data.current = applyNumericOperation(Number(data.current) || 0, Number(action.currentDelta) || 0, 'increment');
+      if (action.targetDelta !== undefined) data.target = applyNumericOperation(Number(data.target) || 0, Number(action.targetDelta) || 0, 'increment');
+      if (data.currentDelta !== undefined) data.current = applyNumericOperation(Number(data.current) || 0, Number(data.currentDelta) || 0, 'increment');
+      if (data.targetDelta !== undefined) data.target = applyNumericOperation(Number(data.target) || 0, Number(data.targetDelta) || 0, 'increment');
+      if (action.data?.currentDelta !== undefined) data.current = applyNumericOperation(Number(data.current) || 0, Number(action.data.currentDelta) || 0, 'increment');
+      if (action.data?.targetDelta !== undefined) data.target = applyNumericOperation(Number(data.target) || 0, Number(action.data.targetDelta) || 0, 'increment');
+
+      if (tile.template === 'checklist') applyChecklistTileUpdate(data, action);
+      else if (tile.template === 'paymentLog') applyPaymentLogTileUpdate(data, action);
+      else if (tile.template === 'log') applyLogTileUpdate(data, action);
+      else if (tile.template === 'utilization') applyUtilizationTileUpdate(data, action, amount, operation, field);
+      else if (tile.template === 'multiTracker') applyMultiTrackerTileUpdate(data, action, amount, operation, field);
+
+      tile.data = sanitizeTileData(tile.template, data);
+    }
+
+    function normalizeDashboardAliases(data, action) {
+      const source = action.data || {};
+      if (source.saved !== undefined && data.current === undefined) data.current = source.saved;
+      if (source.savedAmount !== undefined && data.current === undefined) data.current = source.savedAmount;
+      if (source.goal !== undefined && data.target === undefined) data.target = source.goal;
+      if (source.goalAmount !== undefined && data.target === undefined) data.target = source.goalAmount;
+      if (action.savedDelta !== undefined) data.currentDelta = action.savedDelta;
+      if (action.data?.savedDelta !== undefined) data.currentDelta = action.data.savedDelta;
+      if (action.addAmount !== undefined) data.currentDelta = action.addAmount;
+      if (action.data?.addAmount !== undefined) data.currentDelta = action.data.addAmount;
+    }
+
+    function getActionAmount(action) {
+      const value = action.amount ?? action.value ?? action.delta ?? action.currentDelta ?? action.amountDelta ?? action.data?.amount ?? action.data?.value ?? action.data?.delta;
+      if (value === undefined || value === null || value === '') return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function applyNumericOperation(current, amount, operation) {
+      if (operation.includes('decrement') || operation.includes('subtract') || operation.includes('minus') || operation.includes('reduce')) return current - amount;
+      if (operation.includes('increment') || operation.includes('add') || operation.includes('increase') || operation.includes('additional')) return current + amount;
+      return amount;
+    }
+
+    function normalizeTileField(field) {
+      const f = normalizedText(field);
+      if (['saved', 'current', 'progress', 'amount', 'balance', 'used'].includes(f)) return f === 'saved' || f === 'amount' || f === 'balance' ? 'current' : f;
+      if (['goal', 'target', 'limit'].includes(f)) return f === 'goal' ? 'target' : f;
+      return f || 'current';
+    }
+
+    function inferTileField(tile, action) {
+      const raw = JSON.stringify(action).toLowerCase();
+      if (raw.includes('target') || raw.includes('goal') || raw.includes('limit')) return tile.template === 'utilization' ? 'limit' : 'target';
+      if (raw.includes('used')) return 'used';
+      return 'current';
+    }
+
+    function applyChecklistTileUpdate(data, action) {
+      data.items = Array.isArray(data.items) ? data.items : [];
+      const addText = action.addItem?.text || action.addItem || action.itemText || action.text;
+      if (addText) data.items.push({ id: Date.now().toString(), text: String(addText), checked: !!action.addItem?.checked, dueDate: normalizeDateString(action.addItem?.dueDate || action.dueDate) || '' });
+      const targetName = action.updateItem?.matchText || action.updateItem?.text || action.itemName || action.deleteItem;
+      const item = data.items.find(i => textMatches(i.text, targetName));
+      if (item && action.updateItem) {
+        if (action.updateItem.text) item.text = action.updateItem.text;
+        if (action.updateItem.checked !== undefined) item.checked = !!action.updateItem.checked;
+        if (action.updateItem.dueDate) item.dueDate = resolveAgentDate(action.updateItem.dueDate) || item.dueDate;
+      }
+      if (item && (action.checked !== undefined || normalizedText(action.operation).includes('mark'))) item.checked = action.checked !== false;
+      if (action.deleteItem && item) data.items = data.items.filter(i => i !== item);
+    }
+
+    function applyPaymentLogTileUpdate(data, action) {
+      data.payments = Array.isArray(data.payments) ? data.payments : [];
+      const payment = action.addItem || action.payment || action.addPayment;
+      const amount = Number(payment?.amount ?? action.amount);
+      if (Number.isFinite(amount) && (payment || action.description)) {
+        data.payments.push({
+          id: Date.now().toString(),
+          description: payment?.description || action.description || action.itemName || 'Payment',
+          amount,
+          date: resolveAgentDate(payment?.date || action.date) || new Date().toISOString().split('T')[0]
+        });
+      }
+    }
+
+    function applyLogTileUpdate(data, action) {
+      data.entries = Array.isArray(data.entries) ? data.entries : [];
+      const text = action.addItem?.text || action.entry || action.text || action.note;
+      if (text) data.entries.unshift({ id: Date.now().toString(), text: String(text), timestamp: new Date().toISOString() });
+    }
+
+    function applyUtilizationTileUpdate(data, action, amount, operation, field) {
+      data.items = Array.isArray(data.items) ? data.items : [];
+      const name = action.itemName || action.updateItem?.name || action.addItem?.name;
+      let item = data.items.find(i => textMatches(i.name, name));
+      if (!item && action.addItem) {
+        item = { id: Date.now().toString(), name: action.addItem.name || name || 'Item', used: 0, limit: 0 };
+        data.items.push(item);
+      }
+      if (item && amount !== null && ['used', 'limit'].includes(field)) item[field] = applyNumericOperation(Number(item[field]) || 0, amount, operation);
+      if (item && action.updateItem) Object.assign(item, action.updateItem);
+    }
+
+    function applyMultiTrackerTileUpdate(data, action, amount, operation, field) {
+      data.items = Array.isArray(data.items) ? data.items : [];
+      const name = action.itemName || action.updateItem?.name || action.addItem?.name;
+      let item = data.items.find(i => textMatches(i.name, name));
+      if (!item && action.addItem) {
+        item = { id: Date.now().toString(), name: action.addItem.name || name || 'Metric', current: 0, target: 100, unit: '' };
+        data.items.push(item);
+      }
+      const targetField = field === 'used' ? 'current' : field;
+      if (item && amount !== null && ['current', 'target'].includes(targetField)) item[targetField] = applyNumericOperation(Number(item[targetField]) || 0, amount, operation);
+      if (item && action.updateItem) Object.assign(item, action.updateItem);
+    }
+
+    function normalizedText(value) {
+      return String(value || '').toLowerCase().trim();
+    }
+
+    function textMatches(source, query) {
+      const s = normalizedText(source);
+      const q = normalizedText(query);
+      return !!q && (s === q || s.includes(q) || q.includes(s));
+    }
+
+    function findCheckLogByName(name) {
+      if (!name) return null;
+      const lower = normalizedText(name);
+      if (['latest', 'last', 'most recent'].includes(lower)) return [...(state.checkTracker.checkLogs || [])].sort((a, b) => (b.id || 0) - (a.id || 0))[0] || null;
+      if (['current', 'active', 'this check'].includes(lower)) return findActiveCheckLog(new Date().toISOString().split('T')[0]);
+      return (state.checkTracker.checkLogs || []).find(log => textMatches(log.name, name)) || null;
+    }
+
+    function findCheckLogFromAgent(action = {}) {
+      if (action.id !== undefined) {
+        const byId = (state.checkTracker.checkLogs || []).find(log => String(log.id) === String(action.id));
+        if (byId) return byId;
+      }
+      const name = action.matchName || action.checkLogName || action.name;
+      const byName = findCheckLogByName(name);
+      if (byName) return byName;
+      const date = resolveAgentDate(action.date || action.startDate || action.when);
+      if (date) return findActiveCheckLog(date);
+      return null;
+    }
+
+    function findCheckLogItem(name, checkLogName) {
+      const logs = checkLogName ? [findCheckLogByName(checkLogName)].filter(Boolean) : [...(state.checkTracker.checkLogs || [])].sort((a, b) => (b.id || 0) - (a.id || 0));
+      for (const log of logs) {
+        const item = (log.items || []).find(i => textMatches(i.bill, name));
+        if (item) return { log, item };
+      }
+      return null;
+    }
+
+    function findRecurringBill(name) {
+      return (state.checkTracker.bills || []).find(b => textMatches(b.name, name)) || null;
+    }
+
+    function findOneTimeExpense(name) {
+      return (state.checkTracker.oneTimeExpenses || []).find(e => textMatches(e.name, name)) || null;
+    }
+
+    function findDashboardTile(title, template = '') {
+      const candidates = Object.values(state.dashboard.tiles || {}).filter(tile => !template || tile.template === template);
+      if (!title && candidates.length === 1) return candidates[0];
+      const direct = candidates.find(tile => textMatches(tile.data?.title, title));
+      if (direct) return direct;
+      const qTokens = normalizedText(title).split(/\s+/).filter(Boolean);
+      if (qTokens.length) {
+        return candidates.find(tile => {
+          const haystack = `${tile.template} ${tile.data?.title || ''} ${Object.keys(tile.data || {}).join(' ')}`.toLowerCase();
+          return qTokens.every(token => haystack.includes(token));
+        }) || null;
+      }
+      return null;
+    }
+
+    function updateHistoricalBillItems(oldName, bill) {
+      (state.checkTracker.checkLogs || []).forEach(log => {
+        (log.items || []).forEach(item => {
+          if (textMatches(item.bill, oldName)) {
+            item.bill = bill.name;
+            item.cost = bill.amount;
+            item.category = bill.category || item.category || 'Other';
+          }
+        });
+      });
+    }
+
+    function sanitizeTileData(template, data = {}) {
+      const out = { ...(data || {}) };
+      out.title = String(out.title || templates[template]?.name || 'New Tile').trim();
+      if (template === 'progress') {
+        if (out.saved !== undefined && out.current === undefined) out.current = out.saved;
+        if (out.goal !== undefined && out.target === undefined) out.target = out.goal;
+        out.current = Number(out.current) || 0;
+        out.target = Number(out.target) || 100;
+        out.unit = out.unit || '';
+      } else if (template === 'savings') {
+        if (out.saved !== undefined && out.current === undefined) out.current = out.saved;
+        if (out.goal !== undefined && out.target === undefined) out.target = out.goal;
+        out.current = Number(out.current) || 0;
+        out.target = Number(out.target) || 1000;
+        out.currency = out.currency || 'USD';
+        out.targetDate = resolveAgentDate(out.targetDate) || '';
+      } else if (template === 'countdown') {
+        out.targetDate = resolveAgentDate(out.targetDate) || new Date().toISOString().split('T')[0];
+        out.description = out.description || '';
+      } else if (template === 'checklist') {
+        out.recurrence = ['None', 'Daily', 'Weekly', 'Monthly'].includes(out.recurrence) ? out.recurrence : 'None';
+        out.items = normalizeTileItems(out.items, 'checklist');
+      } else if (template === 'paymentLog') {
+        out.currency = out.currency || 'USD';
+        out.payments = normalizeTileItems(out.payments, 'paymentLog');
+      } else if (template === 'log') {
+        out.entries = normalizeTileItems(out.entries, 'log');
+      } else if (template === 'utilization') {
+        out.items = normalizeTileItems(out.items, 'utilization');
+        out.targetUtil = Number(out.targetUtil) || 30;
+        out.lowerIsBetter = out.lowerIsBetter !== false;
+      } else if (template === 'multiTracker') {
+        out.items = normalizeTileItems(out.items, 'multiTracker');
+      }
+      delete out.currentDelta;
+      delete out.targetDelta;
+      delete out.amountDelta;
+      delete out.delta;
+      delete out.savedDelta;
+      delete out.addAmount;
+      delete out.saved;
+      delete out.savedAmount;
+      delete out.goal;
+      delete out.goalAmount;
+      return out;
+    }
+
+    function normalizeTileItems(items, template) {
+      const arr = Array.isArray(items) ? items : [];
+      return arr.map((item, index) => {
+        const base = typeof item === 'string' ? { text: item, name: item, description: item } : { ...(item || {}) };
+        base.id = String(base.id || `${Date.now()}-${index}`);
+        if (template === 'checklist') return { id: base.id, text: base.text || base.name || 'Task', checked: !!base.checked, dueDate: resolveAgentDate(base.dueDate) || '' };
+        if (template === 'paymentLog') return { id: base.id, description: base.description || base.name || 'Payment', amount: Number(base.amount) || 0, date: resolveAgentDate(base.date) || new Date().toISOString().split('T')[0] };
+        if (template === 'log') return { id: base.id, text: base.text || base.description || base.name || 'Entry', timestamp: base.timestamp || new Date((resolveAgentDate(base.date) || new Date().toISOString().split('T')[0]) + 'T00:00:00').toISOString() };
+        if (template === 'utilization') return { id: base.id, name: base.name || 'Item', used: Number(base.used) || 0, limit: Number(base.limit) || 0 };
+        if (template === 'multiTracker') return { id: base.id, name: base.name || 'Item', current: Number(base.current ?? base.value) || 0, target: Number(base.target) || 100, unit: base.unit || '', lowerIsBetter: !!base.lowerIsBetter };
+        return base;
+      });
+    }
+
+    function normalizeRecurrenceInterval(value) {
+      const raw = String(value || 'monthly').toLowerCase().replace(/\s+/g, '');
+      if (['weekly', 'biweekly', 'monthly', 'bimonthly', 'quarterly', 'semiannual', 'annual'].includes(raw)) return raw;
+      if (raw.includes('week') && raw.includes('2')) return 'biweekly';
+      if (raw.includes('week')) return 'weekly';
+      if (raw.includes('quarter')) return 'quarterly';
+      if (raw.includes('year') || raw.includes('annual')) return 'annual';
+      return 'monthly';
+    }
+
+    function normalizeDateString(value) {
+      if (!value) return '';
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return '';
+      return formatDateYMD(d);
+    }
+
+    function resolveAgentDate(value) {
+      return normalizeDateString(value) || extractDateReference(value);
+    }
+
+    function dayFromDate(value) {
+      const normalized = resolveAgentDate(value);
+      return normalized ? parseInt(normalized.split('-')[2]) : null;
+    }
+
+    function nextDueDateForDay(day) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      let due = new Date(today.getFullYear(), today.getMonth(), day);
+      if (due < today) due = new Date(today.getFullYear(), today.getMonth() + 1, day);
+      return formatDateYMD(due);
+    }
+
     // ===================== TEMPLATES =====================
     const templates = {
       progress: { name: 'Progress', icon: '📊', fields: [{ name: 'title', label: 'Tracker Name', type: 'text', required: true }, { name: 'current', label: 'Current Value', type: 'number', default: 0 }, { name: 'target', label: 'Target Value', type: 'number', default: 100 }, { name: 'unit', label: 'Unit (optional)', type: 'text', placeholder: 'e.g., tasks, miles' }] },
@@ -1090,14 +2732,27 @@
     }
 
     // ===================== CLOUD SYNC =====================
-    async function saveDataToCloud() {
-      const client = getSupabaseClient(); if (!client) return;
+    async function saveDataToCloud(options = {}) {
+      const silent = !!options.silent;
+      const client = getSupabaseClient(); if (!client) return { status: 'skipped', reason: 'Supabase is not configured.' };
       try {
         const { data: userData, error: authError } = await client.auth.getUser();
-        if (authError || !userData?.user) { alert('You must be logged in to save your data.'); return; }
+        if (authError || !userData?.user) {
+          const reason = authError?.message || 'You must be logged in to save your data.';
+          if (!silent) alert('You must be logged in to save your data.');
+          return { status: 'error', reason };
+        }
         const { error } = await client.from('dashboard_data').upsert({ user_id: userData.user.id, data: state }, { onConflict: 'user_id' });
-        if (error) { alert('Failed to save data to cloud.'); } else { alert('Data saved to cloud.'); }
-      } catch (err) { alert('Failed to save data to cloud.'); }
+        if (error) {
+          if (!silent) alert('Failed to save data to cloud.');
+          return { status: 'error', reason: error.message || 'Failed to save data to cloud.' };
+        }
+        if (!silent) alert('Data saved to cloud.');
+        return { status: 'ok' };
+      } catch (err) {
+        if (!silent) alert('Failed to save data to cloud.');
+        return { status: 'error', reason: err.message || 'Failed to save data to cloud.' };
+      }
     }
 
     async function syncDataFromCloud(isAutoSync = false) {
@@ -1168,7 +2823,7 @@
     function renderProgressContent(c, tile) {
       const current = Number(tile.data.current) || 0, target = Number(tile.data.target) || 1;
       const progress = Math.min(100, (current / target) * 100);
-      c.innerHTML = `<div class="w-full h-2 rounded-full progress-bar-bg overflow-hidden"><div class="progress-bar-fill h-full rounded-full" style="width:${progress}%"></div></div><p class="text-xs text-center mt-2 text-slate-400">${progress.toFixed(1)}% Complete</p><div class="grid grid-cols-2 gap-4 mt-3"><div><p class="text-xs text-slate-500">Current</p><p class="font-semibold text-white">${current}${tile.data.unit ? ' ' + tile.data.unit : ''}</p></div><div><p class="text-xs text-slate-500">Target</p><p class="font-semibold text-white">${target}${tile.data.unit ? ' ' + tile.data.unit : ''}</p></div></div>`;
+      c.innerHTML = `<div class="w-full h-2 rounded-full progress-bar-bg overflow-hidden"><div class="progress-bar-fill h-full rounded-full" style="width:${progress}%"></div></div><p class="text-xs text-center mt-2 text-slate-400">${progress.toFixed(1)}% Complete</p>${renderTileNumberControls(tile, 'Current', 'Target')}`;
     }
     function renderSavingsContent(c, tile) {
       const current = Number(tile.data.current) || 0, target = Number(tile.data.target) || 1;
@@ -1180,8 +2835,24 @@
         const daysLeft = Math.ceil((new Date(tile.data.targetDate) - new Date()) / 86400000);
         dateHTML = `<div class="text-xs text-slate-500 mb-2">${daysLeft >= 0 ? daysLeft + ' days remaining' : 'Target date passed'}</div>`;
       }
-      c.innerHTML = `${dateHTML}<div class="w-full h-2 rounded-full progress-bar-bg overflow-hidden"><div class="progress-bar-fill h-full rounded-full" style="width:${progress}%"></div></div><div class="grid grid-cols-2 gap-4 mt-3"><div><p class="text-xs text-slate-500">Saved</p><p class="font-semibold text-white">${fmt.format(current)}</p></div><div><p class="text-xs text-slate-500">Goal</p><p class="font-semibold text-white">${fmt.format(target)}</p></div></div>`;
+      c.innerHTML = `${dateHTML}<div class="w-full h-2 rounded-full progress-bar-bg overflow-hidden"><div class="progress-bar-fill h-full rounded-full" style="width:${progress}%"></div></div>${renderTileNumberControls(tile, 'Saved', 'Goal')}`;
     }
+    function renderTileNumberControls(tile, currentLabel, targetLabel) {
+      const current = Number(tile.data.current) || 0;
+      const target = Number(tile.data.target) || 0;
+      return `<div class="tile-quick-grid">
+        <label><span class="tile-quick-label">${currentLabel}</span><input class="tile-quick-input" type="number" step="0.01" value="${current}" onchange="updateDashboardTileNumber(${tile.id},'current',this.value)"></label>
+        <label><span class="tile-quick-label">${targetLabel}</span><input class="tile-quick-input" type="number" step="0.01" value="${target}" onchange="updateDashboardTileNumber(${tile.id},'target',this.value)"></label>
+      </div>`;
+    }
+    window.updateDashboardTileNumber = (tileId, field, value) => {
+      const tile = state.dashboard.tiles[tileId];
+      if (!tile || !['current', 'target'].includes(field)) return;
+      tile.data[field] = Number(value) || 0;
+      saveState();
+      saveDataToCloud();
+      renderAll();
+    };
     function renderUtilizationContent(c, tile) {
       let items = tile.data.items || [];
       if (!state.dashboard.isEditing && tile.data.sortBy && tile.data.sortBy !== 'OrderEntered') items = applySorting(items, tile.data.sortBy, tile.data.sortAscending);
@@ -1192,8 +2863,17 @@
       const overallUtil = totalLimit > 0 ? (totalUsed / totalLimit * 100) : 0;
       let progressWidth = lowerIsBetter ? (totalLimit > 0 ? Math.max(0, Math.min(100, ((100 - overallUtil) / (100 - targetUtil)) * 100)) : 0) : Math.min(100, (overallUtil / targetUtil) * 100);
       const percentageText = lowerIsBetter ? `${overallUtil.toFixed(1)}% (Target: ≤${targetUtil}%)` : `${overallUtil.toFixed(1)}% (Goal: ≥${targetUtil}%)`;
-      c.innerHTML = `<table class="w-full text-xs mb-3"><thead><tr class="text-slate-500 border-b border-slate-700"><th class="text-left py-1 pr-2">Item</th><th class="text-right py-1 px-2">Used</th><th class="text-right py-1 px-2">Limit</th><th class="text-right py-1 pl-2">Util%</th></tr></thead><tbody class="list-container" data-tile-id="${tile.id}" data-list-type="items">${items.map(item => { const used = Number(item.used) || 0; const limit = Number(item.limit) || 0; const util = limit > 0 ? (used / limit * 100) : 0; const dc = state.dashboard.isEditing ? 'list-item-draggable' : ''; return `<tr class="border-b border-slate-800 ${dc}" draggable="${state.dashboard.isEditing}" data-item-id="${item.id}"><td class="py-1 pr-2 text-slate-300">${item.name || 'Unnamed'}</td><td class="py-1 px-2 text-right text-slate-300">${used}</td><td class="py-1 px-2 text-right text-slate-300">${limit}</td><td class="py-1 pl-2 text-right text-slate-300">${util.toFixed(0)}%</td></tr>`; }).join('')}</tbody></table><div><div class="flex justify-between text-xs text-slate-500 mb-1"><span>Usage: ${totalUsed} of ${totalLimit}</span><span>${percentageText}</span></div><div class="w-full h-2 rounded-full progress-bar-bg overflow-hidden"><div class="h-full rounded-full progress-bar-fill" style="width:${progressWidth}%"></div></div></div>`;
+      c.innerHTML = `<table class="w-full text-xs mb-3"><thead><tr class="text-slate-500 border-b border-slate-700"><th class="text-left py-1 pr-2">Item</th><th class="text-right py-1 px-2">Used</th><th class="text-right py-1 px-2">Limit</th><th class="text-right py-1 pl-2">Util%</th></tr></thead><tbody class="list-container" data-tile-id="${tile.id}" data-list-type="items">${items.map(item => { const used = Number(item.used) || 0; const limit = Number(item.limit) || 0; const util = limit > 0 ? (used / limit * 100) : 0; const dc = state.dashboard.isEditing ? 'list-item-draggable' : ''; return `<tr class="border-b border-slate-800 ${dc}" draggable="${state.dashboard.isEditing}" data-item-id="${item.id}"><td class="py-1 pr-2 text-slate-300">${item.name || 'Unnamed'}</td><td class="py-1 px-1 text-right"><input class="tile-quick-input text-right" type="number" step="0.01" value="${used}" onchange="updateUtilizationItem(${tile.id},'${item.id}','used',this.value)"></td><td class="py-1 px-1 text-right"><input class="tile-quick-input text-right" type="number" step="0.01" value="${limit}" onchange="updateUtilizationItem(${tile.id},'${item.id}','limit',this.value)"></td><td class="py-1 pl-2 text-right text-slate-300">${util.toFixed(0)}%</td></tr>`; }).join('')}</tbody></table><div><div class="flex justify-between text-xs text-slate-500 mb-1"><span>Usage: ${totalUsed} of ${totalLimit}</span><span>${percentageText}</span></div><div class="w-full h-2 rounded-full progress-bar-bg overflow-hidden"><div class="h-full rounded-full progress-bar-fill" style="width:${progressWidth}%"></div></div></div>`;
     }
+    window.updateUtilizationItem = (tileId, itemId, field, value) => {
+      const tile = state.dashboard.tiles[tileId];
+      const item = tile?.data?.items?.find(i => String(i.id) === String(itemId));
+      if (!item || !['used', 'limit'].includes(field)) return;
+      item[field] = Number(value) || 0;
+      saveState();
+      saveDataToCloud();
+      renderAll();
+    };
     function renderPaymentLogContent(c, tile) {
       let payments = tile.data.payments || [];
       if (!state.dashboard.isEditing && tile.data.sortBy && tile.data.sortBy !== 'OrderEntered') payments = applySorting(payments, tile.data.sortBy, tile.data.sortAscending);
@@ -1257,7 +2937,7 @@
       const displayProgress = lowerIsBetter ? 100 - progress : progress;
       let barClass = 'progress-bar-fill';
       if (lowerIsBetter) { if (progress > 80) barClass = 'bg-red-500'; else if (progress > 50) barClass = 'bg-yellow-400'; }
-      return `<div data-item-id="${item.id}"><div class="flex justify-between items-center text-xs mb-1"><span class="font-medium text-slate-300">${item.name || 'Unnamed'}</span><span class="text-slate-500">${current} / ${target} ${item.unit || ''}</span></div><div class="w-full h-1.5 rounded-full progress-bar-bg overflow-hidden"><div class="${barClass} h-full rounded-full" style="width:${displayProgress}%"></div></div><div class="editing-controls flex items-center gap-2 mt-2"><input type="number" value="${current}" onchange="updateMultiTrackerItem(${tileId},'${item.id}','current',this.value)" placeholder="Current" class="text-xs p-1 w-16"><input type="number" value="${target}" onchange="updateMultiTrackerItem(${tileId},'${item.id}','target',this.value)" placeholder="Target" class="text-xs p-1 w-16"><input type="text" value="${item.name || ''}" onchange="updateMultiTrackerItem(${tileId},'${item.id}','name',this.value)" placeholder="Name" class="text-xs p-1 flex-1"><button class="btn btn-danger btn-xs" onclick="deleteMultiTrackerItem(${tileId},'${item.id}')">×</button></div></div>`;
+      return `<div data-item-id="${item.id}"><div class="flex justify-between items-center text-xs mb-1"><span class="font-medium text-slate-300">${item.name || 'Unnamed'}</span><span class="text-slate-500">${current} / ${target} ${item.unit || ''}</span></div><div class="w-full h-1.5 rounded-full progress-bar-bg overflow-hidden"><div class="${barClass} h-full rounded-full" style="width:${displayProgress}%"></div></div><div class="flex items-center gap-2 mt-2"><input type="number" value="${current}" onchange="updateMultiTrackerItem(${tileId},'${item.id}','current',this.value)" placeholder="Current" class="tile-quick-input w-20"><input type="number" value="${target}" onchange="updateMultiTrackerItem(${tileId},'${item.id}','target',this.value)" placeholder="Target" class="tile-quick-input w-20"><input type="text" value="${item.name || ''}" onchange="updateMultiTrackerItem(${tileId},'${item.id}','name',this.value)" placeholder="Name" class="tile-quick-input flex-1"><button class="btn btn-danger btn-xs editing-controls" onclick="deleteMultiTrackerItem(${tileId},'${item.id}')">×</button></div></div>`;
     }
     window.addMultiTrackerItem = (tileId) => { const tile = state.dashboard.tiles[tileId]; if (!tile.data.items) tile.data.items = []; tile.data.items.push({ id: Date.now().toString(), name: 'New Metric', current: 0, target: 100, unit: '', lowerIsBetter: false }); saveState(); renderAll(); };
     window.updateMultiTrackerItem = (tileId, itemId, prop, value) => { const tile = state.dashboard.tiles[tileId]; const item = tile.data.items.find(i => i.id === itemId); if (item) { item[prop] = (prop === 'current' || prop === 'target') ? Number(value) : value; saveState(); renderAll(); } };
@@ -2775,7 +4455,7 @@
       const settingsBtn = document.getElementById('settingsBtn');
       const syncCalBtn = document.getElementById('syncCalendarBtn');
       const calSyncStatus = document.getElementById('calSyncStatus');
-      if (settingsBtn) settingsBtn.style.display = 'none';
+      if (settingsBtn) settingsBtn.style.display = '';
       if (syncCalBtn) syncCalBtn.style.display = 'none';
       if (calSyncStatus) calSyncStatus.style.display = 'none';
       updateGoogleCalStatus();
@@ -2855,9 +4535,10 @@
 
       const authed = await isUserAuthenticated();
       if (!authed) {
-        if (settingsBtn) settingsBtn.style.display = 'none';
+        if (settingsBtn) settingsBtn.style.display = '';
         if (syncCalBtn) syncCalBtn.style.display = 'none';
         if (calSyncStatus) calSyncStatus.style.display = 'none';
+        updateGoogleCalStatus();
         return;
       }
 
@@ -2902,8 +4583,8 @@
     }
 
     async function showSettingsModal() {
-      if (!(await isUserAuthenticated())) return;
       updateGoogleCalStatus();
+      updateLlmSettingsUI();
       const modal = document.getElementById('settingsModal');
       modal.classList.remove('hidden'); modal.classList.add('flex');
     }
@@ -3387,7 +5068,25 @@
 
       // Settings & Google Calendar
       document.getElementById('settingsBtn')?.addEventListener('click', showSettingsModal);
+      document.getElementById('openLlmSettingsBtn')?.addEventListener('click', showSettingsModal);
+      document.getElementById('aiFloatToggle')?.addEventListener('click', () => toggleAiFloat(true));
+      document.getElementById('aiFloatCloseBtn')?.addEventListener('click', () => toggleAiFloat(false));
+      document.getElementById('aiFloatSettingsBtn')?.addEventListener('click', showSettingsModal);
+      document.getElementById('aiFloatDockBtn')?.addEventListener('click', () => {
+        toggleAiFloat(false);
+        setActiveTab('ai-agent-tab', { persistPreference: false });
+      });
       document.getElementById('settingsModal')?.addEventListener('click', e => { if (e.target.id === 'settingsModal') hideSettingsModal(); });
+      document.getElementById('llmProviderSelect')?.addEventListener('change', e => {
+        const provider = e.target.value;
+        populateLlmModelSelect(provider, LLM_PROVIDER_MODELS[provider]?.[0]?.value || '');
+      });
+      document.getElementById('saveLlmConfigBtn')?.addEventListener('click', () => { saveLlmConfigFromUI(false); window.showToast('AI settings saved.', 'success'); });
+      document.getElementById('testLlmConfigBtn')?.addEventListener('click', testLlmConnection);
+      document.getElementById('clearLlmConfigBtn')?.addEventListener('click', clearLlmConfig);
+      document.getElementById('llmChatForm')?.addEventListener('submit', handleLlmChatSubmit);
+      document.getElementById('llmFloatForm')?.addEventListener('submit', handleLlmChatSubmit);
+      document.querySelectorAll('.ai-chat-input').forEach(input => input.addEventListener('keydown', handleAiChatKeydown));
       document.getElementById('connectGoogleCalBtn')?.addEventListener('click', connectGoogleCalendar);
       document.getElementById('disconnectGoogleCalBtn')?.addEventListener('click', disconnectGoogleCalendar);
       document.getElementById('syncCalendarBtn')?.addEventListener('click', syncToGoogleCalendar);
@@ -3407,6 +5106,8 @@
       await handleOAuthCallback();
       await initGoogleCalUI();
       await updateCalendarSyncButton();
+      updateLlmSettingsUI();
+      renderLlmChat();
       renderAll();
       const initialTab = window.shouldDefaultToMobileView() ? 'mobile-budget-tab' : 'dashboard-tab';
       setActiveTab(initialTab);

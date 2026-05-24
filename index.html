@@ -1741,6 +1741,8 @@
       const checkLogDeletePlan = parseCheckLogDeleteFallback(text);
       if (checkLogDeletePlan) return checkLogDeletePlan;
       if (options.localOnly && (wantsDelete || wantsUpdate)) return { reply: '', actions: [], confidence: 'low' };
+      const spendPlan = parseSpendFallback(text, amount);
+      if (spendPlan) return spendPlan;
       const dashboardPlan = parseDashboardFallback(text, amount);
       if (dashboardPlan) return dashboardPlan;
       const checkLogPlan = parseCheckLogFallback(text, amount);
@@ -1762,6 +1764,17 @@
         reply: 'I understood this as a check-log expense.',
         actions: [{ type: 'add_check_log_expense', name: cleanName || 'One-time expense', amount, date, paid: /spent|paid/i.test(text) }],
         confidence: hasSpendVerb && cleanName ? 'high' : 'medium'
+      };
+    }
+
+    function parseSpendFallback(text, amount) {
+      if (!amount || !/\b(spent|paid|bought|purchased)\b/i.test(text)) return null;
+      const cleanName = inferFallbackExpenseName(text, false) || 'One-time expense';
+      const date = extractDateReference(text) || new Date().toISOString().split('T')[0];
+      return {
+        reply: 'I understood this as a check-log expense.',
+        actions: [{ type: 'add_check_log_expense', name: cleanName, amount, date, paid: true }],
+        confidence: 'high'
       };
     }
 

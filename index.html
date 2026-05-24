@@ -835,6 +835,7 @@
 
     let state = {};
     let llmChatHistory = [];
+    let pendingAgentConfirmation = null;
 
     const DEFAULT_STATE = {
       dashboard: { rows: [], tiles: {}, nextRowId: 1, nextTileId: 1, isEditing: false },
@@ -1358,8 +1359,8 @@
     function getAgentSystemPrompt() {
       const actionSchema = [
         'add_check_log_expense {name, amount, date?, paid?, category?, checkLogName?}',
-        'update_check_log_expense {name?, matchName?, amount?, date?, paid?, category?, checkLogName?}',
-        'delete_check_log_expense {matchName, checkLogName?}',
+        'update_check_log_expense {name?, matchName?, amount?, dueDate?, matchDate?, paid?, category?, checkLogName?, checkLogDate?, checkLogStartDate?}',
+        'delete_check_log_expense {matchName, matchDate?, checkLogName?, checkLogDate?, checkLogStartDate?}',
         'set_check_log_amount {amount, checkLogName?}',
         'create_check_log {name?, startDate?, endDate?, checkAmount?}',
         'update_check_log {matchName?, id?, name?, startDate?, endDate?, checkAmount?}',
@@ -1371,6 +1372,8 @@
         'add_one_time_expense {name, amount, date?, category?}',
         'update_one_time_expense {matchName, name?, amount?, date?, category?}',
         'delete_one_time_expense {matchName}',
+        'update_expense_tab_expense {matchName, expenseType?, name?, amount?, dueDay?, date?, firstDueDate?, recurrenceInterval?, category?}',
+        'delete_expense_tab_expense {matchName, expenseType?}',
         'create_dashboard_tile {template, title?, data?, rowTitle?}',
         'update_dashboard_tile {matchTitle, template?, operation?, field?, amount?, itemName?, data?, addItem?, updateItem?, deleteItem?}',
         'delete_dashboard_tile {matchTitle}'
@@ -1387,12 +1390,14 @@
         'Prefer one or two actions. Never send duplicate actions. Never include unchanged fields.',
         'Resolve time references into ISO dates before acting. "today", "yesterday", "tomorrow", "last Friday", "next payday", and similar words belong in date/startDate/paidDate/firstDueDate fields, never in merchant names, bill names, tile titles, or labels.',
         'For check-log expenses, choose the check log whose startDate/endDate contains the expense date. If the user gives a date phrase, include date:"YYYY-MM-DD" in the action.',
+        'For historic check-log expenses, include checkLogDate or checkLogStartDate to scope which old check log to search, and include matchDate when the row date matters. Use dueDate for the new row date when updating.',
         'For new checks/paychecks, use create_check_log with startDate and checkAmount. If the user says "add/create a check for DATE for $X", "got paid $X today", or "new check for $X", that is a new check log unless they clearly mean an expense.',
         'For deleting an entire paycheck/check-log card, use delete_check_log. For deleting only a row inside a check log, use delete_check_log_expense.',
         'For future check logs, accept future dates like "June 7", "next Friday", or "next payday"; use create_check_log and include checkAmount if known.',
         'For "I spent", "paid", "bought", or merchant purchases, use add_check_log_expense and set paid=true unless user says planned/unpaid.',
         'For subscriptions, bills, memberships, due dates, or repeating payments, use add_recurring_expense or update_recurring_expense.',
         'For one-off future/manual expenses outside check logs, use add_one_time_expense.',
+        'For Expenses tab edits, use update_expense_tab_expense/delete_expense_tab_expense if unsure whether the target is recurring or one-time. Use expenseType:"recurring" or "one-time" when the user says it. Delete actions require user confirmation in the app; still return the delete action when asked.',
         'For goals, lists, notes, countdowns, payment logs, utilization, savings, or progress trackers, use create_dashboard_tile/update_dashboard_tile.',
         'For creating a savings goal or fund such as "Add a new dashboard titled House Fund with a goal of 20000", use exactly: {"type":"create_dashboard_tile","template":"savings","title":"House Fund","data":{"title":"House Fund","current":0,"target":20000,"currency":"USD"}}.',
         'For "saved/added an additional $X toward Y", use update_dashboard_tile with matchTitle:Y, operation:"increment", field:"current", amount:X. This is common for savings/progress tiles.',
@@ -1656,6 +1661,10 @@
       const pendingMessage = addLlmMessage('assistant', 'Working on that...');
       if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
       try {
+        if (pendingAgentConfirmation) {
+          const handled = await handleAgentConfirmationReply(text, pendingMessage);
+          if (handled) return;
+        }
         const localPlan = parseAgentFallback(text, { localOnly: true });
         if (localPlan.confidence === 'high' && localPlan.actions.length) {
           addAiLog('info', 'local_plan_selected', 'High-confidence local agent plan selected.', { confidence: localPlan.confidence, actions: localPlan.actions.map(a => a.type) });
@@ -1708,6 +1717,28 @@
       if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
       e.preventDefault();
       e.target.closest('form')?.requestSubmit();
+    }
+
+    async function handleAgentConfirmationReply(text, pendingMessage) {
+      const normalized = normalizedText(text);
+      if (/\b(yes|yep|yeah|confirm|confirmed|do it|delete it|remove it|proceed|ok|okay)\b/i.test(normalized)) {
+        const pending = pendingAgentConfirmation;
+        pendingAgentConfirmation = null;
+        addAiLog('info', 'delete_confirmed', 'User confirmed pending AI delete action.', { actions: pending.actions.map(a => a.type) });
+        const result = await applyAgentActions(pending.actions, { skipConfirmation: true });
+        updateLlmMessage(pendingMessage, formatAgentActionReport('Confirmed.', result));
+        return true;
+      }
+      if (/\b(no|nope|cancel|stop|never mind|nevermind|do not|don't)\b/i.test(normalized)) {
+        const pending = pendingAgentConfirmation;
+        pendingAgentConfirmation = null;
+        addAiLog('info', 'delete_cancelled', 'User cancelled pending AI delete action.', { actions: pending.actions.map(a => a.type) });
+        updateLlmMessage(pendingMessage, 'Cancelled. Nothing was deleted.');
+        return true;
+      }
+      pendingAgentConfirmation = null;
+      addAiLog('info', 'delete_confirmation_replaced', 'User sent a new request instead of confirming pending delete.');
+      return false;
     }
 
     function parseAgentResponse(raw) {
@@ -2006,14 +2037,20 @@
       return sanitizeExpenseName(raw);
     }
 
-    async function applyAgentActions(actions) {
-      const report = { ok: [], failed: [], changed: false, attempted: 0 };
+    async function applyAgentActions(actions, options = {}) {
+      const report = { ok: [], failed: [], confirmations: [], changed: false, attempted: 0 };
       for (const rawAction of actions) {
         report.attempted++;
         try {
           const action = normalizeAgentAction(rawAction);
           if (!action || typeof action !== 'object') throw new Error('The agent returned an invalid action.');
           if (!action.type) throw new Error('The model did not return a supported app action to run.');
+          if (!options.skipConfirmation && requiresAgentDeleteConfirmation(action)) {
+            const summary = previewAgentDeleteAction(action);
+            report.confirmations.push({ type: action.type, summary, action });
+            addAiLog('warn', 'delete_confirmation_required', summary, { type: action.type, action });
+            continue;
+          }
           addAiLog('info', 'action_started', `Running ${friendlyActionName(action.type)}.`, { type: action.type, action });
           const summary = executeAgentAction(action);
           report.ok.push({ type: action.type, summary });
@@ -2073,6 +2110,32 @@
       return report;
     }
 
+    function requiresAgentDeleteConfirmation(action) {
+      return ['delete_recurring_expense', 'delete_one_time_expense', 'delete_expense_tab_expense', 'delete_check_log_expense'].includes(action?.type);
+    }
+
+    function previewAgentDeleteAction(action) {
+      if (action.type === 'delete_recurring_expense') {
+        const bill = findRecurringBill(action.matchName || action.name);
+        return bill ? `Delete recurring expense "${bill.name}" for ${formatCurrency(bill.amount)}?` : `Delete recurring expense matching "${action.matchName || action.name || 'unknown'}"?`;
+      }
+      if (action.type === 'delete_one_time_expense') {
+        const exp = findOneTimeExpense(action.matchName || action.name);
+        return exp ? `Delete one-time expense "${exp.name}" for ${formatCurrency(exp.amount)} on ${formatDateForDisplay(exp.date)}?` : `Delete one-time expense matching "${action.matchName || action.name || 'unknown'}"?`;
+      }
+      if (action.type === 'delete_expense_tab_expense') {
+        const found = findExpenseTabExpense(action);
+        if (found?.kind === 'recurring') return `Delete recurring expense "${found.item.name}" for ${formatCurrency(found.item.amount)}?`;
+        if (found?.kind === 'one-time') return `Delete one-time expense "${found.item.name}" for ${formatCurrency(found.item.amount)} on ${formatDateForDisplay(found.item.date)}?`;
+        return `Delete expense matching "${action.matchName || action.name || 'unknown'}" from the Expenses tab?`;
+      }
+      if (action.type === 'delete_check_log_expense') {
+        const found = findCheckLogItem(action.matchName || action.name, action);
+        return found ? `Delete "${found.item.bill || 'expense'}" from ${found.log.name}?` : `Delete check-log expense matching "${action.matchName || action.name || 'unknown'}"?`;
+      }
+      return `Confirm ${friendlyActionName(action.type)}?`;
+    }
+
     function executeAgentAction(action) {
       if (!action.type) throw new Error('The model did not return a supported app action to run.');
       if (!isSupportedAgentAction(action)) throw new Error(`Unsupported action "${action.type}".`);
@@ -2090,6 +2153,8 @@
       if (action.type === 'add_one_time_expense') return addOneTimeExpenseFromAgent(action);
       if (action.type === 'update_one_time_expense') return updateOneTimeExpenseFromAgent(action);
       if (action.type === 'delete_one_time_expense') return deleteOneTimeExpenseFromAgent(action);
+      if (action.type === 'update_expense_tab_expense') return updateExpenseTabExpenseFromAgent(action);
+      if (action.type === 'delete_expense_tab_expense') return deleteExpenseTabExpenseFromAgent(action);
       if (action.type === 'create_dashboard_tile') return createDashboardTileFromAgent(action);
       if (action.type === 'update_dashboard_tile') return updateDashboardTileFromAgent(action);
       if (action.type === 'delete_dashboard_tile') return deleteDashboardTileFromAgent(action);
@@ -2112,6 +2177,8 @@
         'add_one_time_expense',
         'update_one_time_expense',
         'delete_one_time_expense',
+        'update_expense_tab_expense',
+        'delete_expense_tab_expense',
         'create_dashboard_tile',
         'update_dashboard_tile',
         'delete_dashboard_tile'
@@ -2123,8 +2190,17 @@
       if (!report) return 'I could not verify whether that worked.';
       const okText = report.ok?.map(r => r.summary).filter(Boolean) || [];
       const failText = (report.failed || []).map(f => `I could not ${friendlyActionName(f.type)}: ${f.reason}`);
+      const confirmText = report.confirmations?.map(c => c.summary).filter(Boolean) || [];
+      if (okText.length && confirmText.length) {
+        pendingAgentConfirmation = { actions: report.confirmations.map(c => c.action), createdAt: new Date().toISOString() };
+        return `Completed: ${okText.join(' ')} Confirmation needed: ${confirmText.join(' ')} Reply "yes" to confirm or "no" to cancel.`;
+      }
       if (okText.length && failText.length) return `Completed: ${okText.join(' ')} Issues: ${failText.join(' ')}`.trim();
       if (okText.length) return okText.join(' ').trim();
+      if (confirmText.length) {
+        pendingAgentConfirmation = { actions: report.confirmations.map(c => c.action), createdAt: new Date().toISOString() };
+        return `${confirmText.join(' ')} Reply "yes" to confirm or "no" to cancel.`;
+      }
       if (failText.length) return `Nothing was changed. ${failText.join(' ')}`.trim();
       if (intro && (/\?/.test(intro) || /\b(need|missing|which|what|when|where|who|how)\b/i.test(intro))) return intro;
       return 'Nothing was changed because no supported app action was returned.';
@@ -2172,6 +2248,11 @@
         create_goal: 'create_dashboard_tile',
         add_savings_goal: 'create_dashboard_tile',
         create_savings_goal: 'create_dashboard_tile',
+        update_expense: 'update_expense_tab_expense',
+        edit_expense: 'update_expense_tab_expense',
+        change_expense: 'update_expense_tab_expense',
+        delete_expense: 'delete_expense_tab_expense',
+        remove_expense: 'delete_expense_tab_expense',
         update_goal: 'update_dashboard_tile',
         update_savings_goal: 'update_dashboard_tile',
         add_goal_progress: 'update_dashboard_tile'
@@ -2199,6 +2280,14 @@
       if (normalized.template) normalized.template = normalizeDashboardTemplate(normalized.template);
       if (!normalized.matchTitle && normalized.title && normalized.type === 'update_dashboard_tile') normalized.matchTitle = normalized.title;
       if (!normalized.matchName && normalized.checkLogName && ['delete_check_log', 'update_check_log'].includes(normalized.type)) normalized.matchName = normalized.checkLogName;
+      if (!normalized.matchName && normalized.expenseName && ['update_expense_tab_expense', 'delete_expense_tab_expense'].includes(normalized.type)) normalized.matchName = normalized.expenseName;
+      if (!normalized.expenseType && normalized.recurring === true) normalized.expenseType = 'recurring';
+      if (!normalized.expenseType && normalized.oneTime === true) normalized.expenseType = 'one-time';
+      if (!normalized.checkLogDate && normalized.paycheckDate) normalized.checkLogDate = normalized.paycheckDate;
+      if (!normalized.checkLogDate && normalized.checkDate) normalized.checkLogDate = normalized.checkDate;
+      if (!normalized.checkLogStartDate && normalized.startDate && ['update_check_log_expense', 'delete_check_log_expense'].includes(normalized.type)) normalized.checkLogStartDate = normalized.startDate;
+      if (!normalized.dueDate && normalized.newDate && normalized.type === 'update_check_log_expense') normalized.dueDate = normalized.newDate;
+      if (!normalized.matchDate && normalized.originalDate) normalized.matchDate = normalized.originalDate;
       return normalized;
     }
 
@@ -2282,20 +2371,20 @@
     }
 
     function updateCheckLogExpenseFromAgent(action) {
-      const found = findCheckLogItem(action.matchName || action.name, action.checkLogName);
+      const found = findCheckLogItem(action.matchName || action.name, action);
       if (!found) throw new Error('Could not find that check-log expense.');
       const { log, item } = found;
       const oldName = item.bill || 'expense';
       if (action.name) item.bill = sanitizeExpenseName(action.name) || item.bill;
       if (action.amount !== undefined) item.cost = Math.max(0, Number(action.amount) || 0);
-      if (action.date) item.dueDate = resolveAgentDate(action.date) || item.dueDate;
+      if (action.dueDate || action.date) item.dueDate = resolveAgentDate(action.dueDate || action.date) || item.dueDate;
       if (action.paid !== undefined) item.paid = !!action.paid;
       if (action.category) item.category = migrateCategory(action.category);
       return `Updated ${oldName} in ${log.name}.`;
     }
 
     function deleteCheckLogExpenseFromAgent(action) {
-      const found = findCheckLogItem(action.matchName || action.name, action.checkLogName);
+      const found = findCheckLogItem(action.matchName || action.name, action);
       if (!found) throw new Error('Could not find that check-log expense.');
       found.log.items = found.log.items.filter(i => i !== found.item);
       return `Removed ${found.item.bill || 'expense'} from ${found.log.name}.`;
@@ -2388,7 +2477,13 @@
       if (action.name) bill.name = String(action.name).trim();
       if (action.amount !== undefined) bill.amount = Math.max(0, Number(action.amount) || 0);
       if (action.dueDay !== undefined) bill.dueDay = Math.max(1, Math.min(31, parseInt(action.dueDay) || bill.dueDay || 1));
-      if (action.firstDueDate) bill.firstDueDate = resolveAgentDate(action.firstDueDate) || bill.firstDueDate;
+      if (action.firstDueDate || action.dueDate || action.date) {
+        const newDueDate = resolveAgentDate(action.firstDueDate || action.dueDate || action.date);
+        if (newDueDate) {
+          bill.firstDueDate = newDueDate;
+          bill.dueDay = dayFromDate(newDueDate) || bill.dueDay;
+        }
+      }
       if (action.recurrenceInterval) bill.recurrenceInterval = normalizeRecurrenceInterval(action.recurrenceInterval);
       if (action.category) bill.category = migrateCategory(action.category);
       if (action.type) bill.type = ['ongoing', 'limited'].includes(action.type) ? action.type : bill.type;
@@ -2434,7 +2529,7 @@
       const oldName = exp.name;
       if (action.name) exp.name = String(action.name).trim();
       if (action.amount !== undefined) exp.amount = Math.max(0, Number(action.amount) || 0);
-      if (action.date) exp.date = resolveAgentDate(action.date) || exp.date;
+      if (action.date || action.dueDate) exp.date = resolveAgentDate(action.date || action.dueDate) || exp.date;
       if (action.category) exp.category = migrateCategory(action.category);
       return `Updated one-time ${oldName}.`;
     }
@@ -2444,6 +2539,26 @@
       if (!exp) throw new Error('Could not find that one-time expense.');
       state.checkTracker.oneTimeExpenses = state.checkTracker.oneTimeExpenses.filter(e => e !== exp);
       return `Removed one-time ${exp.name}.`;
+    }
+
+    function updateExpenseTabExpenseFromAgent(action) {
+      const found = findExpenseTabExpense(action);
+      if (!found) throw new Error('Could not find that expense in the Expenses tab.');
+      if (found.kind === 'recurring') {
+        return updateRecurringExpenseFromAgent({ ...action, matchName: found.item.name });
+      }
+      return updateOneTimeExpenseFromAgent({ ...action, matchName: found.item.name });
+    }
+
+    function deleteExpenseTabExpenseFromAgent(action) {
+      const found = findExpenseTabExpense(action);
+      if (!found) throw new Error('Could not find that expense in the Expenses tab.');
+      if (found.kind === 'recurring') {
+        state.checkTracker.bills = state.checkTracker.bills.filter(b => b !== found.item);
+        return `Removed recurring ${found.item.name}.`;
+      }
+      state.checkTracker.oneTimeExpenses = state.checkTracker.oneTimeExpenses.filter(e => e !== found.item);
+      return `Removed one-time ${found.item.name}.`;
     }
 
     function createDashboardTileFromAgent(action) {
@@ -2667,13 +2782,42 @@
       return null;
     }
 
-    function findCheckLogItem(name, checkLogName) {
-      const logs = checkLogName ? [findCheckLogByName(checkLogName)].filter(Boolean) : [...(state.checkTracker.checkLogs || [])].sort((a, b) => (b.id || 0) - (a.id || 0));
+    function findCheckLogItem(name, scope = {}) {
+      const action = typeof scope === 'object' && scope !== null ? scope : { checkLogName: scope };
+      const logs = getScopedCheckLogs(action);
+      const matchDate = resolveAgentDate(action.matchDate || action.expenseDate || action.itemDate || action.originalDate);
       for (const log of logs) {
-        const item = (log.items || []).find(i => textMatches(i.bill, name));
+        const item = (log.items || []).find(i => {
+          const nameMatches = textMatches(i.bill, name);
+          const dateMatches = !matchDate || i.dueDate === matchDate;
+          return nameMatches && dateMatches;
+        });
         if (item) return { log, item };
       }
       return null;
+    }
+
+    function getScopedCheckLogs(action = {}) {
+      const logs = [...(state.checkTracker.checkLogs || [])];
+      const byName = action.checkLogName || action.logName || action.paycheckName;
+      const byId = action.checkLogId || action.logId;
+      const checkLogStartDate = resolveAgentDate(action.checkLogStartDate || action.startDate);
+      const checkLogDate = resolveAgentDate(action.checkLogDate || action.paycheckDate || action.checkDate || action.logDate);
+      let scoped = logs;
+      if (byId !== undefined && byId !== null && byId !== '') scoped = scoped.filter(log => String(log.id) === String(byId));
+      if (byName) scoped = scoped.filter(log => textMatches(log.name, byName));
+      if (checkLogStartDate) scoped = scoped.filter(log => log.startDate === checkLogStartDate);
+      if (checkLogDate) scoped = scoped.filter(log => log.startDate && log.endDate && checkLogDate >= log.startDate && checkLogDate <= log.endDate);
+      if (!scoped.length && checkLogDate) {
+        const active = findActiveCheckLog(checkLogDate);
+        if (active) scoped = [active];
+      }
+      if (!scoped.length) scoped = logs;
+      return scoped.sort((a, b) => {
+        const aDate = new Date((a.startDate || '1970-01-01') + 'T00:00:00');
+        const bDate = new Date((b.startDate || '1970-01-01') + 'T00:00:00');
+        return bDate - aDate;
+      });
     }
 
     function findRecurringBill(name) {
@@ -2682,6 +2826,21 @@
 
     function findOneTimeExpense(name) {
       return (state.checkTracker.oneTimeExpenses || []).find(e => textMatches(e.name, name)) || null;
+    }
+
+    function findExpenseTabExpense(action = {}) {
+      const name = action.matchName || action.name || action.expenseName;
+      const type = normalizedText(action.expenseType || action.typeHint || action.kind);
+      const date = resolveAgentDate(action.date || action.matchDate || action.dueDate);
+      const recurring = (state.checkTracker.bills || []).find(b => textMatches(b.name, name));
+      const oneTimeCandidates = (state.checkTracker.oneTimeExpenses || []).filter(e => textMatches(e.name, name));
+      const oneTime = date ? oneTimeCandidates.find(e => e.date === date) : oneTimeCandidates[0];
+      if (type.includes('recurring') || type.includes('bill') || type.includes('subscription')) return recurring ? { kind: 'recurring', item: recurring } : null;
+      if (type.includes('one') || type.includes('manual') || type.includes('single')) return oneTime ? { kind: 'one-time', item: oneTime } : null;
+      if (recurring && oneTime) throw new Error(`Found both recurring and one-time expenses named "${name}". Specify recurring or one-time.`);
+      if (recurring) return { kind: 'recurring', item: recurring };
+      if (oneTime) return { kind: 'one-time', item: oneTime };
+      return null;
     }
 
     function findDashboardTile(title, template = '') {

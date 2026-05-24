@@ -7,6 +7,7 @@
   <title>Make Some Progress</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 
   <script>
@@ -748,6 +749,22 @@
             <button class="btn btn-primary btn-sm w-full" id="connectGoogleCalBtn">Connect Google Calendar</button>
             <button class="btn btn-danger btn-sm w-full mt-2 hidden" id="disconnectGoogleCalBtn">Disconnect</button>
           </div>
+          <div id="bankConnectionSection" class="p-4 rounded-lg bg-slate-800/50 border border-slate-700/50 mt-3">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none"><path d="M4 10.5 12 5l8 5.5M6 10v8M10 10v8M14 10v8M18 10v8M4 19h16" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="text-sm text-white font-medium">Bank Transactions</span>
+              </div>
+              <span id="bankStatus" class="text-xs text-slate-500">Not connected</span>
+            </div>
+            <p class="text-xs text-slate-400 mb-3">Read-only Plaid import. Transactions are staged for review and only added to check logs when you approve them.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button class="btn btn-primary btn-sm" id="connectBankBtn" type="button">Connect Bank</button>
+              <button class="btn btn-secondary btn-sm" id="syncBankBtn" type="button">Sync Since 5/20</button>
+              <button class="btn btn-danger btn-sm hidden" id="unlinkBankBtn" type="button">Unlink</button>
+            </div>
+            <div id="bankSummary" class="mt-3 text-xs text-slate-500"></div>
+          </div>
         </div>
         <div>
           <h3 class="text-sm font-semibold text-slate-300 mb-3">AI Agent</h3>
@@ -835,6 +852,7 @@
     const AI_LOG_KEY = 'make-some-progress-ai-logs-v1';
     const AI_LOG_LIMIT = 200;
     const LLM_REQUEST_TIMEOUT_MS = 30000;
+    const BANK_IMPORT_START_DATE = '2026-05-20';
 
     let state = {};
     let llmChatHistory = [];
@@ -843,6 +861,7 @@
     const DEFAULT_STATE = {
       dashboard: { rows: [], tiles: {}, nextRowId: 1, nextTileId: 1, isEditing: false },
       checkTracker: { bills: [], checkLogs: [], oneTimeExpenses: [] },
+      bankImport: { transactions: [], profiles: {}, lastSyncAt: '', connected: false, institutionName: '' },
       oneTimeExpenseCategoryOverrides: {},
       calendar: { currentDate: new Date().toISOString() },
       appStates: {}
@@ -1036,6 +1055,9 @@
         state.dashboard = state.dashboard || DEFAULT_STATE.dashboard;
         state.checkTracker = state.checkTracker || DEFAULT_STATE.checkTracker;
         state.checkTracker.oneTimeExpenses = state.checkTracker.oneTimeExpenses || [];
+        state.bankImport = state.bankImport || JSON.parse(JSON.stringify(DEFAULT_STATE.bankImport));
+        state.bankImport.transactions = state.bankImport.transactions || [];
+        state.bankImport.profiles = state.bankImport.profiles || {};
         state.oneTimeExpenseCategoryOverrides = state.oneTimeExpenseCategoryOverrides || {};
         state.calendar = state.calendar || DEFAULT_STATE.calendar;
         state.appStates = state.appStates || {};
@@ -1070,6 +1092,7 @@
       }
 
       state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+      state.bankImport = state.bankImport || JSON.parse(JSON.stringify(DEFAULT_STATE.bankImport));
       let migrated = false;
       const oldDashboardData = localStorage.getItem(OLD_DASHBOARD_KEY);
       if (oldDashboardData) {
@@ -1102,6 +1125,270 @@
     function saveState() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
       catch (e) { console.error('Failed to save state:', e); }
+    }
+
+    // ===================== BANK IMPORTS =====================
+    function escapeHtml(value = '') {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function getBankImportState() {
+      state.bankImport = state.bankImport || JSON.parse(JSON.stringify(DEFAULT_STATE.bankImport));
+      state.bankImport.transactions = state.bankImport.transactions || [];
+      state.bankImport.profiles = state.bankImport.profiles || {};
+      return state.bankImport;
+    }
+
+    function normalizeMerchantName(tx = {}) {
+      return String(tx.merchantName || tx.merchant_name || tx.name || tx.rawDescription || tx.raw_description || 'Unknown merchant')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function normalizeBankTransaction(tx = {}) {
+      const id = tx.providerTransactionId || tx.provider_transaction_id || tx.transaction_id || tx.id;
+      const date = tx.date || tx.authorized_date || tx.postedDate || tx.posted_date || '';
+      const amount = Math.abs(Number(tx.amount) || 0);
+      const merchantName = normalizeMerchantName(tx);
+      return {
+        id: String(id || `${date}-${merchantName}-${amount}`),
+        provider: tx.provider || 'plaid',
+        accountId: tx.accountId || tx.account_id || '',
+        date,
+        postedDate: tx.postedDate || tx.posted_date || date,
+        merchantName,
+        rawDescription: tx.rawDescription || tx.raw_description || tx.name || merchantName,
+        amount,
+        category: tx.category || tx.personal_finance_category?.primary || tx.categoryPrimary || tx.category_primary || autoCategorizeOneTime(merchantName),
+        pending: !!tx.pending,
+        ignored: !!tx.ignored,
+        appliedLogId: tx.appliedLogId || tx.applied_log_id || null,
+        appliedItemId: tx.appliedItemId || tx.applied_item_id || null
+      };
+    }
+
+    function buildMerchantProfiles(transactions = []) {
+      return transactions.reduce((profiles, tx) => {
+        if (!tx || tx.ignored || tx.amount <= 0) return profiles;
+        const key = normalizeMerchantName(tx).toLowerCase();
+        if (!profiles[key]) profiles[key] = { merchantName: tx.merchantName, count: 0, total: 0, amounts: {}, firstDate: tx.date, lastDate: tx.date };
+        profiles[key].count += 1;
+        profiles[key].total += Number(tx.amount) || 0;
+        const amountKey = formatCurrency(tx.amount);
+        profiles[key].amounts[amountKey] = (profiles[key].amounts[amountKey] || 0) + 1;
+        if (tx.date < profiles[key].firstDate) profiles[key].firstDate = tx.date;
+        if (tx.date > profiles[key].lastDate) profiles[key].lastDate = tx.date;
+        return profiles;
+      }, {});
+    }
+
+    function mergeBankTransactions(incoming = []) {
+      const bankState = getBankImportState();
+      const existing = new Map(bankState.transactions.map(tx => [tx.id, tx]));
+      incoming.map(normalizeBankTransaction).forEach(tx => {
+        existing.set(tx.id, { ...(existing.get(tx.id) || {}), ...tx });
+      });
+      bankState.transactions = [...existing.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      bankState.profiles = buildMerchantProfiles(bankState.transactions);
+      bankState.lastSyncAt = new Date().toISOString();
+      saveState();
+      updateBankStatusUI();
+    }
+
+    function isBankTransactionDuplicate(log, tx) {
+      if ((log.items || []).some(item => item.bankTransactionId === tx.id)) return true;
+      return (log.items || []).some(item => {
+        const sameDate = (item.dueDate || log.startDate || '') === tx.date;
+        const sameAmount = Math.abs((Number(item.cost) || 0) - tx.amount) < 0.01;
+        const itemName = String(item.bill || '').toLowerCase();
+        const txName = tx.merchantName.toLowerCase();
+        return sameDate && sameAmount && (itemName.includes(txName) || txName.includes(itemName));
+      });
+    }
+
+    function getBankTransactionsForLog(log) {
+      const bankState = getBankImportState();
+      if (!log?.startDate || !log?.endDate) return [];
+      return bankState.transactions
+        .filter(tx => !tx.ignored && tx.amount > 0 && tx.date >= BANK_IMPORT_START_DATE && tx.date >= log.startDate && tx.date <= log.endDate)
+        .map(tx => ({ ...tx, duplicate: isBankTransactionDuplicate(log, tx) }));
+    }
+
+    function getBankSuggestionsForLog(log) {
+      return getBankTransactionsForLog(log).filter(tx => !tx.duplicate);
+    }
+
+    function renderBankReviewForLog(log) {
+      const bankState = getBankImportState();
+      const transactions = getBankTransactionsForLog(log);
+      const suggestions = transactions.filter(tx => !tx.duplicate);
+      const duplicates = transactions.length - suggestions.length;
+      const total = suggestions.reduce((sum, tx) => sum + tx.amount, 0);
+      if (!bankState.connected && bankState.transactions.length === 0) {
+        return `<div class="mt-3 p-3 rounded-lg bg-slate-900/50 border border-slate-700/40 text-xs text-slate-500">Bank import is optional and read-only. Connect in Settings to stage transactions for this check period.</div>`;
+      }
+      const rows = suggestions.slice(0, 8).map(tx => `
+        <div class="flex items-center justify-between gap-3 py-1.5 border-b border-slate-800/60 last:border-b-0">
+          <div class="min-w-0">
+            <p class="text-xs text-slate-200 truncate">${escapeHtml(tx.merchantName)}</p>
+            <p class="text-[11px] text-slate-500">${escapeHtml(formatDateForDisplay(tx.date))}${tx.pending ? ' · pending' : ''}</p>
+          </div>
+          <span class="text-xs font-semibold text-sky-300">${formatCurrency(tx.amount)}</span>
+        </div>
+      `).join('');
+      return `
+        <div class="bank-review mt-3 p-3 rounded-lg bg-sky-500/5 border border-sky-500/20">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <p class="text-xs font-semibold text-sky-200">Bank review</p>
+              <p class="text-[11px] text-slate-400">${suggestions.length} new staged transaction${suggestions.length === 1 ? '' : 's'} · ${formatCurrency(total)} total${duplicates ? ` · ${duplicates} already matched` : ''}</p>
+            </div>
+            <div class="flex gap-2">
+              <button class="btn btn-secondary btn-xs bank-sync-log-btn" type="button">Sync Bank</button>
+              <button class="btn btn-primary btn-xs bank-apply-log-btn" type="button" ${suggestions.length ? '' : 'disabled'}>Add Suggested</button>
+            </div>
+          </div>
+          ${rows ? `<div class="mt-2">${rows}</div>` : '<p class="mt-2 text-[11px] text-slate-500">No new staged expenses for this check period.</p>'}
+        </div>
+      `;
+    }
+
+    async function invokeBankFunction(name, body = {}) {
+      const client = getSupabaseClient();
+      if (!client) throw new Error('Supabase is not available.');
+      const { data: sessionData } = await client.auth.getSession();
+      if (!sessionData?.session) throw new Error('Please log in before using bank sync.');
+      const { data, error } = await client.functions.invoke(name, { body });
+      if (error) throw new Error(error.message || `Bank function ${name} failed.`);
+      if (data?.error) throw new Error(data.error);
+      return data || {};
+    }
+
+    async function connectBankAccount() {
+      try {
+        if (!(await isUserAuthenticated())) { window.showToast('Please log in to connect a bank account.', 'error'); return; }
+        if (!window.Plaid) { window.showToast('Plaid Link did not load. Check your connection and try again.', 'error'); return; }
+        const { link_token } = await invokeBankFunction('plaid-create-link-token', { startDate: BANK_IMPORT_START_DATE });
+        if (!link_token) throw new Error('Plaid did not return a link token.');
+        const handler = window.Plaid.create({
+          token: link_token,
+          onSuccess: async (public_token, metadata) => {
+            try {
+              await invokeBankFunction('plaid-exchange-public-token', { public_token, metadata });
+              getBankImportState().connected = true;
+              getBankImportState().institutionName = metadata?.institution?.name || 'Connected bank';
+              saveState();
+              await syncBankTransactions(true);
+              window.showToast('Bank connected. Transactions were staged for review.', 'success');
+            } catch (err) {
+              window.showToast(err.message || 'Could not finish bank connection.', 'error');
+            }
+          },
+          onExit: err => {
+            if (err) window.showToast(err.display_message || err.error_message || 'Bank connection was not completed.', 'error');
+          }
+        });
+        handler.open();
+      } catch (err) {
+        window.showToast(err.message || 'Could not start bank connection.', 'error');
+      } finally {
+        updateBankStatusUI();
+      }
+    }
+
+    async function syncBankTransactions(silent = false) {
+      try {
+        if (!(await isUserAuthenticated())) { window.showToast('Please log in to sync bank transactions.', 'error'); return; }
+        const data = await invokeBankFunction('plaid-sync-transactions', { startDate: BANK_IMPORT_START_DATE });
+        mergeBankTransactions(data.transactions || []);
+        const bankState = getBankImportState();
+        bankState.connected = data.connected !== false;
+        bankState.institutionName = data.connection?.institution_name || bankState.institutionName || 'Connected bank';
+        saveState();
+        renderCheckLogs();
+        updateBankStatusUI();
+        if (!silent) window.showToast(`Synced ${data.transactions?.length || 0} transaction${(data.transactions?.length || 0) === 1 ? '' : 's'} since 5/20.`, 'success');
+      } catch (err) {
+        if (!silent) window.showToast(err.message || 'Bank sync failed.', 'error');
+        updateBankStatusUI(err.message || 'Sync failed');
+      }
+    }
+
+    async function unlinkBankAccount() {
+      showConfirmModal('Unlink Bank', 'This removes the bank connection token from Supabase. Existing check-log items and staged local transaction history will stay unless you reset app data.', async () => {
+        try {
+          await invokeBankFunction('plaid-unlink-bank');
+          const bankState = getBankImportState();
+          bankState.connected = false;
+          bankState.institutionName = '';
+          saveState();
+          updateBankStatusUI();
+          renderCheckLogs();
+          window.showToast('Bank account unlinked.', 'success');
+        } catch (err) {
+          window.showToast(err.message || 'Could not unlink bank account.', 'error');
+        }
+      });
+    }
+
+    function applyBankSuggestionsToLog(log) {
+      const suggestions = getBankSuggestionsForLog(log);
+      if (!suggestions.length) {
+        window.showToast('No new bank transactions to add for this check log.', 'info');
+        return;
+      }
+      suggestions.forEach(tx => {
+        const newItemId = log.items.length > 0 ? Math.max(...log.items.map(i => i.id || 0)) + 1 : 1;
+        log.items.push({
+          id: newItemId,
+          bill: tx.merchantName,
+          cost: tx.amount,
+          category: migrateCategory(tx.category || autoCategorizeOneTime(tx.merchantName)),
+          dueDate: tx.date,
+          paid: true,
+          bankSource: tx.provider,
+          bankTransactionId: tx.id,
+          bankRawDescription: tx.rawDescription
+        });
+        const stored = getBankImportState().transactions.find(item => item.id === tx.id);
+        if (stored) {
+          stored.appliedLogId = log.id;
+          stored.appliedItemId = newItemId;
+        }
+      });
+      saveState();
+      renderAll();
+      window.showToast(`Added ${suggestions.length} bank transaction${suggestions.length === 1 ? '' : 's'} to ${log.name}.`, 'success');
+    }
+
+    function updateBankStatusUI(errorText = '') {
+      const bankState = getBankImportState();
+      const status = document.getElementById('bankStatus');
+      const summary = document.getElementById('bankSummary');
+      const connectBtn = document.getElementById('connectBankBtn');
+      const syncBtn = document.getElementById('syncBankBtn');
+      const unlinkBtn = document.getElementById('unlinkBankBtn');
+      const connected = !!bankState.connected;
+      if (status) {
+        status.textContent = errorText || (connected ? `Connected${bankState.institutionName ? `: ${bankState.institutionName}` : ''}` : 'Not connected');
+        status.className = `text-xs ${errorText ? 'text-red-400' : connected ? 'text-emerald-400' : 'text-slate-500'}`;
+      }
+      if (connectBtn) connectBtn.classList.toggle('hidden', connected);
+      if (syncBtn) syncBtn.disabled = !connected;
+      if (unlinkBtn) unlinkBtn.classList.toggle('hidden', !connected);
+      if (summary) {
+        const txCount = bankState.transactions.length;
+        const profiles = Object.values(bankState.profiles || {}).sort((a, b) => b.total - a.total).slice(0, 3);
+        const profileText = profiles.length
+          ? profiles.map(p => `${escapeHtml(p.merchantName)} ${p.count}x ${formatCurrency(p.total)}`).join(' · ')
+          : 'No staged merchant profiles yet.';
+        summary.innerHTML = `${txCount} staged transaction${txCount === 1 ? '' : 's'} since ${formatDateForDisplay(BANK_IMPORT_START_DATE)}${bankState.lastSyncAt ? ` · Last sync ${new Date(bankState.lastSyncAt).toLocaleString()}` : ''}<br>${profileText}`;
+      }
     }
 
     // ===================== LLM CONFIG + AGENT =====================
@@ -4086,6 +4373,7 @@
             </table>
           </div>
           <div class="mt-3"><button class="btn btn-secondary btn-sm add-item-btn">+ Add One-Time Bill</button></div>
+          ${renderBankReviewForLog(log)}
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-700/50">
             <div class="stat-card"><p class="text-xs text-slate-500">Projected</p><p class="font-semibold text-sm projected-spending">${formatCurrency(projectedSpending)}</p></div>
             <div class="stat-card"><p class="text-xs text-slate-500">Proj. Balance</p><p class="font-semibold text-sm ${projectedBalance >= 0 ? 'text-emerald-400' : 'text-red-400'} projected-balance">${formatCurrency(projectedBalance)}</p></div>
@@ -4170,7 +4458,11 @@
       const logId = parseInt(logCard.dataset.logId);
       const log = state.checkTracker.checkLogs.find(l => l.id === logId); if (!log) return;
 
-      if (target.classList.contains('add-item-btn')) {
+      if (target.classList.contains('bank-sync-log-btn')) {
+        syncBankTransactions(false);
+      } else if (target.classList.contains('bank-apply-log-btn')) {
+        applyBankSuggestionsToLog(log);
+      } else if (target.classList.contains('add-item-btn')) {
         const newItemId = log.items.length > 0 ? Math.max(...log.items.map(i => i.id)) + 1 : 1;
         log.items.push({ id: newItemId, bill: 'One-time expense', cost: 0, category: 'Other', dueDate: new Date().toISOString().split('T')[0], paid: false });
         saveState(); renderCheckLogs();
@@ -4944,28 +5236,15 @@
       if (parts.length < 3 || parts.some(isNaN)) { alert('Invalid date format.'); return; }
       const payDate = new Date(parts[0], parts[1] - 1, parts[2]);
       const endDate = new Date(payDate); endDate.setDate(endDate.getDate() + 13);
-      const items = [];
-      state.checkTracker.bills.forEach(bill => {
-        const year = payDate.getFullYear(); const startMonth = payDate.getMonth();
-        const startDue = new Date(year, startMonth, bill.dueDay);
-        if (startDue >= payDate && startDue <= endDate) {
-          items.push({ id: items.length + 1, bill: bill.name, cost: bill.amount, category: bill.category || 'Other', dueDate: startDue.toISOString().split('T')[0], paid: false });
-        }
-        const endMonth = endDate.getMonth(); const endYear = endDate.getFullYear();
-        if (endMonth !== startMonth) {
-          const nextDue = new Date(endYear, endMonth, bill.dueDay);
-          if (nextDue >= payDate && nextDue <= endDate) {
-            items.push({ id: items.length + 1, bill: bill.name, cost: bill.amount, category: bill.category || 'Other', dueDate: nextDue.toISOString().split('T')[0], paid: false });
-          }
-        }
-      });
       const logs = state.checkTracker.checkLogs;
       const newId = logs.length > 0 ? Math.max(...logs.map(l => l.id)) + 1 : 1;
-      logs.push({
+      const log = {
         id: newId, name: `Check ${logs.length + 1}`, month: payDate.getMonth() + 1, year: payDate.getFullYear(),
-        items, sortBy: 'bill', sortOrder: 'asc',
-        startDate: payDate.toISOString().split('T')[0], endDate: endDate.toISOString().split('T')[0]
-      });
+        items: [], sortBy: 'bill', sortOrder: 'asc',
+        startDate: formatDateYMD(payDate), endDate: formatDateYMD(endDate), checkAmount: 0
+      };
+      syncBillsIntoCheckLog(log);
+      logs.push(log);
       saveState(); renderAll(); dateInput.value = '';
     }
 
@@ -5160,6 +5439,7 @@
     async function showSettingsModal() {
       updateGoogleCalStatus();
       updateLlmSettingsUI();
+      updateBankStatusUI();
       renderAiLogs();
       const modal = document.getElementById('settingsModal');
       modal.classList.remove('hidden'); modal.classList.add('flex');
@@ -5670,6 +5950,9 @@
       window.addEventListener('unhandledrejection', e => addAiLog('error', 'unhandled_rejection', e.reason?.message || String(e.reason || 'Unhandled promise rejection.')));
       document.getElementById('connectGoogleCalBtn')?.addEventListener('click', connectGoogleCalendar);
       document.getElementById('disconnectGoogleCalBtn')?.addEventListener('click', disconnectGoogleCalendar);
+      document.getElementById('connectBankBtn')?.addEventListener('click', connectBankAccount);
+      document.getElementById('syncBankBtn')?.addEventListener('click', () => syncBankTransactions(false));
+      document.getElementById('unlinkBankBtn')?.addEventListener('click', unlinkBankAccount);
       document.getElementById('syncCalendarBtn')?.addEventListener('click', syncToGoogleCalendar);
       document.getElementById('syncGcalBtn')?.addEventListener('click', async () => {
         const btn = document.getElementById('syncGcalBtn');
@@ -5690,6 +5973,7 @@
       updateLlmSettingsUI();
       loadLlmChatHistory();
       renderLlmChat();
+      updateBankStatusUI();
       renderAll();
       const initialTab = window.shouldDefaultToMobileView() ? 'mobile-budget-tab' : 'dashboard-tab';
       setActiveTab(initialTab);

@@ -1263,8 +1263,32 @@
       if (!client) throw new Error('Supabase is not available.');
       const { data: sessionData } = await client.auth.getSession();
       if (!sessionData?.session) throw new Error('Please log in before using bank sync.');
-      const { data, error } = await client.functions.invoke(name, { body });
-      if (error) throw new Error(error.message || `Bank function ${name} failed.`);
+      const functionUrl = `${SUPABASE_URL.replace('.supabase.co', '.functions.supabase.co')}/${name}`;
+      let response;
+      try {
+        response = await fetch(functionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_ANON,
+            Authorization: `Bearer ${sessionData.session.access_token}`
+          },
+          body: JSON.stringify(body)
+        });
+      } catch (err) {
+        throw new Error(`Could not reach the bank sync backend. Check your connection and confirm the Supabase Edge Functions are deployed. (${err.message || 'network error'})`);
+      }
+
+      const text = await response.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch (err) { data = { error: text }; }
+      if (response.status === 404) {
+        throw new Error(`Bank sync backend is not deployed yet. Deploy the Supabase Edge Function "${name}" and set the Plaid secrets before connecting.`);
+      }
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('Bank sync is only available after signing in, and the Edge Function must allow authenticated Supabase users.');
+      }
+      if (!response.ok) throw new Error(data?.error || data?.message || `Bank function ${name} failed with status ${response.status}.`);
       if (data?.error) throw new Error(data.error);
       return data || {};
     }

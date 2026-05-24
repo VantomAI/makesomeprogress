@@ -39,3 +39,7 @@ supabase functions deploy plaid-unlink-bank
 6. Click `Add Suggested` to add new matched expenses.
 
 The import is additive only. It does not delete check logs, remove expenses, overwrite manual history, or change check amounts.
+
+## Common Error
+
+If the app says `Bank sync backend is not deployed yet` or `Failed to send a request to the Edge Function`, the browser reached Supabase but the function endpoint is missing. Deploy the four Plaid functions above, then refresh the app and try connecting again.

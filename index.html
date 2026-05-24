@@ -1394,6 +1394,7 @@
         'For subscriptions, bills, memberships, due dates, or repeating payments, use add_recurring_expense or update_recurring_expense.',
         'For one-off future/manual expenses outside check logs, use add_one_time_expense.',
         'For goals, lists, notes, countdowns, payment logs, utilization, savings, or progress trackers, use create_dashboard_tile/update_dashboard_tile.',
+        'For creating a savings goal or fund such as "Add a new dashboard titled House Fund with a goal of 20000", use exactly: {"type":"create_dashboard_tile","template":"savings","title":"House Fund","data":{"title":"House Fund","current":0,"target":20000,"currency":"USD"}}.',
         'For "saved/added an additional $X toward Y", use update_dashboard_tile with matchTitle:Y, operation:"increment", field:"current", amount:X. This is common for savings/progress tiles.',
         'For "set Y goal/target to $X", use operation:"set", field:"target", amount:X. For "change current/saved to $X", use field:"current".',
         'For checklist/log/payment tiles, use addItem/updateItem/deleteItem inside update_dashboard_tile. For utilization or multiTracker, include itemName plus field and amount.',
@@ -1796,6 +1797,8 @@
       const dashboardIntent = /\b(saved|save|saving|contributed|contribution|added|additional|extra|towards?|toward|progress|goal|target|dashboard|tracker|tile|put|moved|transferred|deposited)\b/i.test(text);
       const spendIntent = /\b(spent|bought|purchased|paid)\b/i.test(text) && !dashboardIntent;
       if (!dashboardIntent || spendIntent) return null;
+      const createPlan = parseDashboardCreateFallback(text, amount);
+      if (createPlan) return createPlan;
       const titleMatch = text.match(/(?:towards?|toward|to|for)\s+["']([^"']+)["']/i) || text.match(/["']([^"']+)["']/);
       const matchTitle = titleMatch?.[1]?.trim() || findDashboardTitleInText(text);
       if (!matchTitle) return null;
@@ -1807,6 +1810,46 @@
         };
       }
       return null;
+    }
+
+    function parseDashboardCreateFallback(text, amount) {
+      const createIntent = /\b(add|create|make|start|new|set\s+up)\b/i.test(text) && /\b(dashboard|tile|tracker|goal|fund|savings?)\b/i.test(text);
+      if (!createIntent) return null;
+      const title = extractDashboardTitle(text);
+      if (!title) return null;
+      const template = /\b(goal|fund|saving|savings|save)\b/i.test(text) ? 'savings' : 'progress';
+      const data = template === 'savings'
+        ? { title, current: 0, target: amount, currency: 'USD' }
+        : { title, current: 0, target: amount, unit: '' };
+      return {
+        reply: `I understood this as a new ${template === 'savings' ? 'savings goal' : 'progress tracker'}.`,
+        actions: [{ type: 'create_dashboard_tile', template, title, data }],
+        confidence: 'high'
+      };
+    }
+
+    function extractDashboardTitle(text) {
+      const quoted = text.match(/["']([^"']+)["']/)?.[1]?.trim();
+      if (quoted) return quoted;
+      const patterns = [
+        /\b(?:dashboard|tile|tracker|goal|fund)\s+(?:called|named|titled)\s+(.+?)(?:\s+(?:with|for|goal|target|of)\b|$)/i,
+        /\b(?:called|named|titled)\s+(.+?)(?:\s+(?:with|for|goal|target|of)\b|$)/i,
+        /\b(?:add|create|make|start|new|set\s+up)\s+(?:a\s+|an\s+|new\s+)?(?:dashboard|tile|tracker|goal|fund)?\s*(?:for\s+)?(.+?)(?:\s+(?:with|for|goal|target|of)\b|$)/i
+      ];
+      for (const pattern of patterns) {
+        const match = text.match(pattern)?.[1]?.trim();
+        if (match) return sanitizeDashboardTitle(match);
+      }
+      return '';
+    }
+
+    function sanitizeDashboardTitle(title) {
+      return String(title || '')
+        .replace(/\b(a|an|new|dashboard|tile|tracker|with|for|target|of)\b/gi, ' ')
+        .replace(/\$\s*[\d,]+(?:\.\d{1,2})?/g, ' ')
+        .replace(/\b[\d,]+(?:\.\d{1,2})?\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
     }
 
     function parseCheckLogFallback(text, amount) {
@@ -2119,12 +2162,34 @@
         delete_paycheck: 'delete_check_log',
         delete_paycheck_log: 'delete_check_log',
         dashboard_update: 'update_dashboard_tile',
+        add_dashboard: 'create_dashboard_tile',
+        add_dashboard_tile: 'create_dashboard_tile',
+        create_dashboard: 'create_dashboard_tile',
+        create_dashboard_tile: 'create_dashboard_tile',
+        add_tile: 'create_dashboard_tile',
+        create_tile: 'create_dashboard_tile',
+        add_goal: 'create_dashboard_tile',
+        create_goal: 'create_dashboard_tile',
+        add_savings_goal: 'create_dashboard_tile',
+        create_savings_goal: 'create_dashboard_tile',
         update_goal: 'update_dashboard_tile',
         update_savings_goal: 'update_dashboard_tile',
         add_goal_progress: 'update_dashboard_tile'
       };
       normalized.type = typeMap[rawType] || rawType;
       if (!normalized.type && (normalized.checkAmount !== undefined || normalized.startDate) && (normalized.amount !== undefined || normalized.checkAmount !== undefined)) normalized.type = 'create_check_log';
+      if (!normalized.type && (normalized.title || normalized.dashboardTitle || normalized.goalName) && (normalized.target !== undefined || normalized.goal !== undefined || normalized.amount !== undefined)) normalized.type = 'create_dashboard_tile';
+      if (normalized.type === 'create_dashboard_tile') {
+        if (!normalized.title && normalized.dashboardTitle) normalized.title = normalized.dashboardTitle;
+        if (!normalized.title && normalized.goalName) normalized.title = normalized.goalName;
+        if (!normalized.template) normalized.template = normalizeDashboardTemplate(normalized.tileType || normalized.kind || (/goal|fund|saving/i.test(`${normalized.title || ''} ${normalized.purpose || ''}`) ? 'savings' : 'progress'));
+        normalized.data = { ...(normalized.data || {}) };
+        if (normalized.title && !normalized.data.title) normalized.data.title = normalized.title;
+        const targetValue = normalized.target ?? normalized.goal ?? normalized.goalAmount ?? normalized.amount;
+        if (targetValue !== undefined && normalized.data.target === undefined) normalized.data.target = targetValue;
+        const currentValue = normalized.current ?? normalized.saved ?? normalized.startingAmount;
+        if (currentValue !== undefined && normalized.data.current === undefined) normalized.data.current = currentValue;
+      }
       if (!normalized.type && (normalized.matchTitle || normalized.tileName)) normalized.type = 'update_dashboard_tile';
       if (normalized.checkAmount === undefined && normalized.amount !== undefined && normalized.type === 'create_check_log') normalized.checkAmount = normalized.amount;
       if (!normalized.matchTitle && normalized.tileName) normalized.matchTitle = normalized.tileName;

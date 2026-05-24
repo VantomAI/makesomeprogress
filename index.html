@@ -1780,6 +1780,9 @@
 
     function parseDashboardFallback(text, amount) {
       if (!amount) return null;
+      const dashboardIntent = /\b(saved|save|saving|contributed|contribution|added|additional|extra|towards?|toward|progress|goal|target|dashboard|tracker|tile|put|moved|transferred|deposited)\b/i.test(text);
+      const spendIntent = /\b(spent|bought|purchased|paid)\b/i.test(text) && !dashboardIntent;
+      if (!dashboardIntent || spendIntent) return null;
       const titleMatch = text.match(/(?:towards?|toward|to|for)\s+["']([^"']+)["']/i) || text.match(/["']([^"']+)["']/);
       const matchTitle = titleMatch?.[1]?.trim() || findDashboardTitleInText(text);
       if (!matchTitle) return null;
@@ -1808,7 +1811,7 @@
     function findDashboardTitleInText(text) {
       const haystack = normalizedText(text);
       if (!haystack) return '';
-      const titles = (state.dashboard.tiles || [])
+      const titles = getDashboardTiles()
         .map(tile => tile.data?.title || tile.rowTitle || '')
         .filter(Boolean)
         .sort((a, b) => b.length - a.length);
@@ -1819,6 +1822,13 @@
         return normalizedTitle.split(/\s+/).filter(Boolean).every(token => haystack.includes(token));
       });
       return match || '';
+    }
+
+    function getDashboardTiles() {
+      const tiles = state.dashboard?.tiles;
+      if (Array.isArray(tiles)) return tiles.filter(Boolean);
+      if (tiles && typeof tiles === 'object') return Object.values(tiles).filter(Boolean);
+      return [];
     }
 
     function parseCheckLogDeleteFallback(text) {

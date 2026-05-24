@@ -29,6 +29,8 @@ supabase functions deploy plaid-sync-transactions
 supabase functions deploy plaid-unlink-bank
 ```
 
+If you are using the Supabase Dashboard editor instead of the CLI, paste each function's `index.ts` exactly as-is. The files are self-contained for Dashboard deployment and do not require the `_shared` helper file.
+
 ## Test Flow
 
 1. Sign into Make Some Progress.
@@ -43,3 +45,5 @@ The import is additive only. It does not delete check logs, remove expenses, ove
 ## Common Error
 
 If the app says `Bank sync backend is not deployed yet` or `Failed to send a request to the Edge Function`, the browser reached Supabase but the function endpoint is missing. Deploy the four Plaid functions above, then refresh the app and try connecting again.
+
+If Supabase says it cannot find `../_shared/bank.ts`, you pasted an older shared-helper version of the function. Use the current self-contained `index.ts` files in `supabase/functions/*/index.ts`.

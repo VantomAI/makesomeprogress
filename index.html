@@ -1341,6 +1341,20 @@
       }
     }
 
+    async function promiseWithTimeout(promise, timeoutMs, message) {
+      let timer;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(message || `Operation timed out after ${Math.round(timeoutMs / 1000)} seconds.`)), timeoutMs);
+          })
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     function getAgentSystemPrompt() {
       const actionSchema = [
         'add_check_log_expense {name, amount, date?, paid?, category?, checkLogName?}',
@@ -1638,26 +1652,21 @@
       const config = getLlmConfig();
       addLlmMessage('user', text);
       input.value = '';
-      const localPlan = parseAgentFallback(text, { localOnly: true });
-      if (localPlan.confidence === 'high' && localPlan.actions.length) {
-        addAiLog('info', 'local_plan_selected', 'High-confidence local agent plan selected.', { confidence: localPlan.confidence, actions: localPlan.actions.map(a => a.type) });
-        try {
-          const result = await applyAgentActions(localPlan.actions);
-          addLlmMessage('assistant', formatAgentActionReport(localPlan.reply, result));
-        } catch (err) {
-          addAiLog('error', 'local_action_unhandled_error', err.message || 'Local action failed unexpectedly.');
-          addLlmMessage('assistant', `I could not complete that local action: ${err.message || 'Unexpected error.'}`);
-        }
-        return;
-      }
-      if (!config.apiKey || !getActiveLlmModel(config)) {
-        addAiLog('warn', 'provider_required', 'Request could not be handled locally and no live provider is configured.', { localConfidence: localPlan.confidence });
-        addLlmMessage('assistant', 'I could not confidently handle that locally. Open AI Settings and connect Gemini, Z.AI, or xAI for more flexible requests.');
-        return;
-      }
-      if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
       const pendingMessage = addLlmMessage('assistant', 'Working on that...');
+      if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
       try {
+        const localPlan = parseAgentFallback(text, { localOnly: true });
+        if (localPlan.confidence === 'high' && localPlan.actions.length) {
+          addAiLog('info', 'local_plan_selected', 'High-confidence local agent plan selected.', { confidence: localPlan.confidence, actions: localPlan.actions.map(a => a.type) });
+          const result = await applyAgentActions(localPlan.actions);
+          updateLlmMessage(pendingMessage, formatAgentActionReport(localPlan.reply, result));
+          return;
+        }
+        if (!config.apiKey || !getActiveLlmModel(config)) {
+          addAiLog('warn', 'provider_required', 'Request could not be handled locally and no live provider is configured.', { localConfidence: localPlan.confidence });
+          updateLlmMessage(pendingMessage, 'I could not confidently handle that locally. Open AI Settings and connect Gemini, Z.AI, or xAI for more flexible requests.');
+          return;
+        }
         const profile = getLlmProfile(config);
         addAiLog('info', 'llm_request_started', `Sending request to ${providerLabel(config.provider)} / ${getActiveLlmModel(config)}.`, {
           provider: config.provider,
@@ -1964,7 +1973,11 @@
           addAiLog('error', 'state_save_failed', err.message || 'The change was made in memory, but local save failed.');
         }
         try {
-          const cloudResult = await saveDataToCloud({ silent: true });
+          const cloudResult = await promiseWithTimeout(
+            saveDataToCloud({ silent: true }),
+            5000,
+            'Cloud sync took too long. The local app was updated, but Supabase did not confirm within 5 seconds.'
+          );
           if (cloudResult?.status === 'error') {
             report.failed.push({
               type: 'cloud_sync',

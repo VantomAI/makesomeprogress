@@ -831,6 +831,7 @@
     const LLM_CONFIG_KEY = 'make-some-progress-llm-config-v1';
     const AI_LOG_KEY = 'make-some-progress-ai-logs-v1';
     const AI_LOG_LIMIT = 200;
+    const LLM_REQUEST_TIMEOUT_MS = 30000;
 
     let state = {};
     let llmChatHistory = [];
@@ -1324,6 +1325,22 @@
       return Number.isNaN(date.getTime()) ? String(value || '') : date.toLocaleString();
     }
 
+    async function fetchWithTimeout(url, options = {}, timeoutMs = LLM_REQUEST_TIMEOUT_MS) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { ...options, signal: controller.signal });
+      } catch (err) {
+        if (err?.name === 'AbortError') throw new Error(`AI provider request timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+        if (err instanceof TypeError && /failed to fetch|networkerror|load failed/i.test(err.message || '')) {
+          throw new Error('The browser could not reach the AI provider. This can happen when the provider blocks browser requests from static sites, the network is unavailable, or the endpoint/model is invalid.');
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     function getAgentSystemPrompt() {
       const actionSchema = [
         'add_check_log_expense {name, amount, date?, paid?, category?, checkLogName?}',
@@ -1482,7 +1499,7 @@
         generationConfig: { temperature: profile.temperature, maxOutputTokens: profile.maxTokens }
       };
       if (forceJson) body.generationConfig.responseMimeType = 'application/json';
-      const resp = await fetch(endpoint, {
+      const resp = await fetchWithTimeout(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -1505,7 +1522,7 @@
       };
       if (forceJson) body.response_format = { type: 'json_object' };
       if (config.provider === 'zai') body.thinking = { type: profile.zaiThinking };
-      const resp = await fetch(`${baseUrl}/chat/completions`, {
+      const resp = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
         body: JSON.stringify(body)
@@ -1583,9 +1600,20 @@
     }
 
     function addLlmMessage(role, content) {
-      llmChatHistory.push({ role, content, ts: new Date().toISOString() });
+      const message = { role, content, ts: new Date().toISOString() };
+      llmChatHistory.push(message);
       addAiLog('info', role === 'user' ? 'chat_user' : 'chat_assistant', content, { role });
       renderLlmChat();
+      return message;
+    }
+
+    function updateLlmMessage(message, content) {
+      if (!message) return addLlmMessage('assistant', content);
+      message.content = content;
+      message.ts = new Date().toISOString();
+      addAiLog('info', message.role === 'user' ? 'chat_user_updated' : 'chat_assistant_updated', content, { role: message.role });
+      renderLlmChat();
+      return message;
     }
 
     function toggleAiFloat(forceOpen = null) {
@@ -1613,8 +1641,13 @@
       const localPlan = parseAgentFallback(text, { localOnly: true });
       if (localPlan.confidence === 'high' && localPlan.actions.length) {
         addAiLog('info', 'local_plan_selected', 'High-confidence local agent plan selected.', { confidence: localPlan.confidence, actions: localPlan.actions.map(a => a.type) });
-        const result = await applyAgentActions(localPlan.actions);
-        addLlmMessage('assistant', formatAgentActionReport(localPlan.reply, result));
+        try {
+          const result = await applyAgentActions(localPlan.actions);
+          addLlmMessage('assistant', formatAgentActionReport(localPlan.reply, result));
+        } catch (err) {
+          addAiLog('error', 'local_action_unhandled_error', err.message || 'Local action failed unexpectedly.');
+          addLlmMessage('assistant', `I could not complete that local action: ${err.message || 'Unexpected error.'}`);
+        }
         return;
       }
       if (!config.apiKey || !getActiveLlmModel(config)) {
@@ -1623,6 +1656,7 @@
         return;
       }
       if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
+      const pendingMessage = addLlmMessage('assistant', 'Working on that...');
       try {
         const profile = getLlmProfile(config);
         addAiLog('info', 'llm_request_started', `Sending request to ${providerLabel(config.provider)} / ${getActiveLlmModel(config)}.`, {
@@ -1644,16 +1678,16 @@
           usedRepair: resolvedPlan !== plan
         });
         const result = await applyAgentActions(resolvedPlan.actions || []);
-        addLlmMessage('assistant', formatAgentActionReport(resolvedPlan.reply || 'Done.', result));
+        updateLlmMessage(pendingMessage, formatAgentActionReport(resolvedPlan.reply || 'Done.', result));
       } catch (err) {
         addAiLog('error', 'llm_request_failed', err.message || 'AI request failed.', { provider: config.provider, model: getActiveLlmModel(config) });
         const fallback = parseAgentFallback(text);
         if (fallback.actions.length) {
           addAiLog('info', 'fallback_after_error', 'Used local fallback after LLM failure.', { confidence: fallback.confidence, actions: fallback.actions.map(a => a.type) });
           const result = await applyAgentActions(fallback.actions);
-          addLlmMessage('assistant', formatAgentActionReport(fallback.reply, result));
+          updateLlmMessage(pendingMessage, formatAgentActionReport(fallback.reply, result));
         } else {
-          addLlmMessage('assistant', `I could not complete that yet: ${err.message}`);
+          updateLlmMessage(pendingMessage, `I could not complete that yet: ${err.message}`);
         }
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
@@ -1920,18 +1954,42 @@
         }
       }
       if (report.changed) {
-        saveState();
-        const cloudResult = await saveDataToCloud({ silent: true });
-        if (cloudResult?.status === 'error') {
+        try {
+          saveState();
+        } catch (err) {
+          report.failed.push({
+            type: 'state_save',
+            reason: err.message || 'The change was made in memory, but local save failed.'
+          });
+          addAiLog('error', 'state_save_failed', err.message || 'The change was made in memory, but local save failed.');
+        }
+        try {
+          const cloudResult = await saveDataToCloud({ silent: true });
+          if (cloudResult?.status === 'error') {
+            report.failed.push({
+              type: 'cloud_sync',
+              reason: cloudResult.reason || 'The local change was saved, but cloud sync did not complete.'
+            });
+            addAiLog('warn', 'cloud_sync_failed', cloudResult.reason || 'The local change was saved, but cloud sync did not complete.');
+          } else {
+            addAiLog('info', 'state_saved', 'AI changes were saved locally.', { cloudStatus: cloudResult?.status || 'unknown' });
+          }
+        } catch (err) {
           report.failed.push({
             type: 'cloud_sync',
-            reason: cloudResult.reason || 'The local change was saved, but cloud sync did not complete.'
+            reason: err.message || 'Cloud sync failed unexpectedly.'
           });
-          addAiLog('warn', 'cloud_sync_failed', cloudResult.reason || 'The local change was saved, but cloud sync did not complete.');
-        } else {
-          addAiLog('info', 'state_saved', 'AI changes were saved locally.', { cloudStatus: cloudResult?.status || 'unknown' });
+          addAiLog('warn', 'cloud_sync_failed', err.message || 'Cloud sync failed unexpectedly.');
         }
-        renderAll();
+        try {
+          renderAll();
+        } catch (err) {
+          report.failed.push({
+            type: 'app_refresh',
+            reason: err.message || 'The change was made, but the app view did not refresh.'
+          });
+          addAiLog('error', 'app_refresh_failed', err.message || 'The change was made, but the app view did not refresh.');
+        }
       }
       return report;
     }
@@ -1996,6 +2054,8 @@
     function friendlyActionName(type) {
       if (type === 'app_action') return 'complete that action';
       if (type === 'cloud_sync') return 'sync the change to cloud';
+      if (type === 'state_save') return 'save the change locally';
+      if (type === 'app_refresh') return 'refresh the app view';
       const words = normalizedText(type || 'that action').replace(/_/g, ' ');
       return words || 'that action';
     }

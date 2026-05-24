@@ -2483,12 +2483,13 @@
       const name = String(action.name || 'New recurring expense').trim();
       const amount = Math.max(0, Number(action.amount) || 0);
       if (!amount) throw new Error('A recurring expense needs an amount.');
-      const dueDay = Math.max(1, Math.min(31, parseInt(action.dueDay) || dayFromDate(action.firstDueDate) || 1));
+      const dueDay = normalizeDueDay(action.dueDay, dayFromDate(action.firstDueDate) || 1);
       const recurrenceInterval = normalizeRecurrenceInterval(action.recurrenceInterval);
       const firstDueDate = resolveAgentDate(action.firstDueDate) || nextDueDateForDay(dueDay);
       const category = action.category ? migrateCategory(action.category) : autoCategorizeOneTime(name);
       const bills = state.checkTracker.bills;
       const existing = bills.find(b => (b.name || '').toLowerCase().trim() === name.toLowerCase());
+      const oldName = existing?.name || null;
       const bill = existing || { id: bills.length > 0 ? Math.max(...bills.map(b => b.id || 0)) + 1 : 1 };
       Object.assign(bill, {
         name,
@@ -2500,7 +2501,7 @@
         recurrenceInterval
       });
       if (!existing) bills.push(bill);
-      syncRecurringBillIntoOpenLogs(bill);
+      syncRecurringBillIntoOpenLogs(bill, oldName);
       return `${existing ? 'Updated' : 'Added'} recurring ${name} for ${formatCurrency(amount)} due day ${dueDay}.`;
     }
 
@@ -2508,10 +2509,12 @@
       const bill = findRecurringBill(action.matchName || action.name);
       if (!bill) throw new Error('Could not find that recurring expense.');
       const oldName = bill.name;
+      const hadExplicitDate = !!(action.firstDueDate || action.dueDate || action.date);
+      const hadDueDay = action.dueDay !== undefined;
       if (action.name) bill.name = String(action.name).trim();
       if (action.amount !== undefined) bill.amount = Math.max(0, Number(action.amount) || 0);
-      if (action.dueDay !== undefined) bill.dueDay = Math.max(1, Math.min(31, parseInt(action.dueDay) || bill.dueDay || 1));
-      if (action.firstDueDate || action.dueDate || action.date) {
+      if (hadDueDay) bill.dueDay = normalizeDueDay(action.dueDay, bill.dueDay || 1);
+      if (hadExplicitDate) {
         const newDueDate = resolveAgentDate(action.firstDueDate || action.dueDate || action.date);
         if (newDueDate) {
           bill.firstDueDate = newDueDate;
@@ -2519,9 +2522,11 @@
         }
       }
       if (action.recurrenceInterval) bill.recurrenceInterval = normalizeRecurrenceInterval(action.recurrenceInterval);
+      if (hadDueDay && !hadExplicitDate) bill.firstDueDate = firstDueDateForDueDay(bill.dueDay, bill.firstDueDate);
+      if (!bill.firstDueDate && bill.dueDay) bill.firstDueDate = nextDueDateForDay(bill.dueDay);
       if (action.category) bill.category = migrateCategory(action.category);
       if (action.type) bill.type = ['ongoing', 'limited'].includes(action.type) ? action.type : bill.type;
-      syncRecurringBillIntoOpenLogs(bill);
+      syncRecurringBillIntoOpenLogs(bill, oldName);
       updateHistoricalBillItems(oldName, bill);
       if (bill.gcalEventId && getGoogleCalToken()) updateGcalEvent(bill);
       return `Updated recurring ${oldName}.`;
@@ -2624,15 +2629,48 @@
       return `Removed dashboard tile "${tile.data?.title || 'Untitled'}".`;
     }
 
-    function syncRecurringBillIntoOpenLogs(bill) {
+    function getBillDueForLog(bill, log) {
+      if (!log?.startDate || !log?.endDate) return null;
+      const logStart = new Date(log.startDate + 'T00:00:00');
+      return bill.firstDueDate && bill.recurrenceInterval
+        ? getNextDueDate(bill.firstDueDate, bill.recurrenceInterval, logStart)
+        : dateForDueDayInMonth(bill.dueDay || 1, logStart.getFullYear(), logStart.getMonth());
+    }
+
+    function syncRecurringBillIntoOpenLogs(bill, previousName = null) {
+      const todayStr = formatDateYMD(new Date());
+      const matchName = previousName || bill.name;
       (state.checkTracker.checkLogs || []).forEach(log => {
         if (!log.startDate || !log.endDate) return;
-        const due = getNextDueDate(bill.firstDueDate, bill.recurrenceInterval, new Date(log.startDate + 'T00:00:00'));
+        const due = getBillDueForLog(bill, log);
         if (!due) return;
         const dueStr = formatDateYMD(due);
-        if (dueStr < log.startDate || dueStr > log.endDate) return;
-        const exists = log.items.some(item => (item.bill || '').toLowerCase().trim() === (bill.name || '').toLowerCase().trim() && item.dueDate === dueStr);
-        if (exists) return;
+        const belongsInLog = dueStr >= log.startDate && dueStr <= log.endDate;
+        const canMoveScheduledItems = previousName !== null && log.endDate >= todayStr;
+        const matchesBill = item => textMatches(item.bill, matchName) || textMatches(item.bill, bill.name);
+
+        if (!belongsInLog) {
+          if (canMoveScheduledItems) log.items = log.items.filter(item => item.paid || !matchesBill(item));
+          return;
+        }
+
+        let scheduledItem = log.items.find(item => matchesBill(item) && item.dueDate === dueStr);
+        if (!scheduledItem && canMoveScheduledItems) scheduledItem = log.items.find(item => matchesBill(item) && !item.paid);
+
+        if (scheduledItem) {
+          scheduledItem.bill = bill.name;
+          scheduledItem.cost = bill.amount;
+          scheduledItem.category = bill.category || scheduledItem.category || 'Other';
+          scheduledItem.dueDate = dueStr;
+          let kept = false;
+          log.items = log.items.filter(item => {
+            if (!matchesBill(item) || item.paid) return true;
+            if (item === scheduledItem && !kept) { kept = true; return true; }
+            return false;
+          });
+          return;
+        }
+
         const newItemId = log.items.length > 0 ? Math.max(...log.items.map(i => i.id || 0)) + 1 : 1;
         log.items.push({ id: newItemId, bill: bill.name, cost: bill.amount, category: bill.category || 'Other', dueDate: dueStr, paid: false });
       });
@@ -2640,9 +2678,7 @@
 
     function syncBillsIntoCheckLog(log) {
       (state.checkTracker.bills || []).forEach(bill => {
-        const due = bill.firstDueDate && bill.recurrenceInterval
-          ? getNextDueDate(bill.firstDueDate, bill.recurrenceInterval, new Date(log.startDate + 'T00:00:00'))
-          : new Date(new Date(log.startDate + 'T00:00:00').getFullYear(), new Date(log.startDate + 'T00:00:00').getMonth(), bill.dueDay || 1);
+        const due = getBillDueForLog(bill, log);
         if (!due) return;
         const dueStr = formatDateYMD(due);
         if (dueStr < log.startDate || dueStr > log.endDate) return;
@@ -2992,11 +3028,35 @@
       return normalized ? parseInt(normalized.split('-')[2]) : null;
     }
 
+    function normalizeDueDay(day, fallback = 1) {
+      return Math.max(1, Math.min(31, parseInt(day) || fallback || 1));
+    }
+
+    function dateForDueDayInMonth(day, year, monthIndex) {
+      const dueDay = normalizeDueDay(day);
+      const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+      return new Date(year, monthIndex, Math.min(dueDay, lastDay));
+    }
+
+    function firstDueDateForDueDay(day, currentFirstDueDate = '') {
+      const dueDay = normalizeDueDay(day, dayFromDate(currentFirstDueDate) || 1);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const current = normalizeDateString(currentFirstDueDate)
+        ? new Date(currentFirstDueDate + 'T00:00:00')
+        : today;
+      let candidate = dateForDueDayInMonth(dueDay, current.getFullYear(), current.getMonth());
+      while (candidate < today) {
+        candidate = dateForDueDayInMonth(dueDay, candidate.getFullYear(), candidate.getMonth() + 1);
+      }
+      return formatDateYMD(candidate);
+    }
+
     function nextDueDateForDay(day) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      let due = new Date(today.getFullYear(), today.getMonth(), day);
-      if (due < today) due = new Date(today.getFullYear(), today.getMonth() + 1, day);
+      let due = dateForDueDayInMonth(day, today.getFullYear(), today.getMonth());
+      if (due < today) due = dateForDueDayInMonth(day, today.getFullYear(), today.getMonth() + 1);
       return formatDateYMD(due);
     }
 
@@ -3628,7 +3688,7 @@
         <div><label class="text-xs font-medium text-slate-400 mb-1 block">Recurrence Interval</label>
           <select id="billEditInterval">${RECURRENCE_INTERVALS.map(i => `<option value="${i.value}" ${bill.recurrenceInterval === i.value ? 'selected' : ''}>${i.label}</option>`).join('')}</select>
         </div>
-        <div><label class="text-xs font-medium text-slate-400 mb-1 block">Due Day (legacy, 1-31)</label><input type="number" id="billEditDueDay" value="${bill.dueDay || 1}" min="1" max="31"></div>
+        <div><label class="text-xs font-medium text-slate-400 mb-1 block">Due Day (updates next due date)</label><input type="number" id="billEditDueDay" value="${bill.dueDay || 1}" min="1" max="31"></div>
         <div><label class="text-xs font-medium text-slate-400 mb-1 block">Type</label>
           <select id="billEditType"><option value="ongoing" ${bill.type === 'ongoing' ? 'selected' : ''}>Ongoing</option><option value="limited" ${bill.type === 'limited' ? 'selected' : ''}>Limited (Payoff)</option></select>
         </div>
@@ -3638,6 +3698,17 @@
       document.getElementById('billEditType').onchange = function() {
         document.getElementById('billEditPayoffRow').classList.toggle('hidden', this.value !== 'limited');
       };
+      const firstDueDateEl = document.getElementById('billEditFirstDueDate');
+      const dueDayEl = document.getElementById('billEditDueDay');
+      let firstDueDateTouched = false;
+      firstDueDateEl.addEventListener('input', () => {
+        firstDueDateTouched = true;
+        const dateDay = dayFromDate(firstDueDateEl.value);
+        if (dateDay) dueDayEl.value = dateDay;
+      });
+      dueDayEl.addEventListener('input', () => {
+        if (!firstDueDateTouched) firstDueDateEl.value = firstDueDateForDueDay(dueDayEl.value, firstDueDateEl.value);
+      });
 
       modal.classList.remove('hidden'); modal.classList.add('flex');
     }
@@ -3667,13 +3738,25 @@
       const bill = state.checkTracker.bills.find(b => b.id === editingBillId);
       if (!bill) return;
       const oldName = bill.name;
-      const oldCategory = bill.category;
+      const previousFirstDueDate = bill.firstDueDate || '';
+      const previousDueDay = normalizeDueDay(bill.dueDay, 1);
+      const firstDueDateInput = document.getElementById('billEditFirstDueDate').value || '';
+      const dueDayInput = normalizeDueDay(document.getElementById('billEditDueDay').value, previousDueDay);
+      const firstDueDateChanged = firstDueDateInput !== previousFirstDueDate;
+      const dueDayChanged = dueDayInput !== previousDueDay;
       bill.name = document.getElementById('billEditName').value || 'New Bill';
       bill.amount = parseFloat(document.getElementById('billEditAmount').value) || 0;
       bill.category = document.getElementById('billEditCategory').value;
-      bill.firstDueDate = document.getElementById('billEditFirstDueDate').value || '';
       bill.recurrenceInterval = document.getElementById('billEditInterval').value;
-      bill.dueDay = parseInt(document.getElementById('billEditDueDay').value) || 1;
+      bill.dueDay = dueDayInput;
+      if (firstDueDateChanged) {
+        bill.firstDueDate = firstDueDateInput || nextDueDateForDay(bill.dueDay);
+        bill.dueDay = dayFromDate(bill.firstDueDate) || bill.dueDay;
+      } else if (dueDayChanged) {
+        bill.firstDueDate = firstDueDateForDueDay(bill.dueDay, previousFirstDueDate);
+      } else {
+        bill.firstDueDate = firstDueDateInput || bill.firstDueDate || nextDueDateForDay(bill.dueDay);
+      }
       bill.type = document.getElementById('billEditType').value;
       if (bill.type === 'limited') bill.totalToPay = parseFloat(document.getElementById('billEditTotalToPay').value) || 0;
       else delete bill.totalToPay;
@@ -3709,6 +3792,8 @@
           }
         }
       }
+
+      syncRecurringBillIntoOpenLogs(bill, oldName);
 
       // Update GCal event if one exists for this bill
       if (bill.gcalEventId && getGoogleCalToken()) updateGcalEvent(bill);

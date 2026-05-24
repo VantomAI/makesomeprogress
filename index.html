@@ -808,6 +808,7 @@
           <div class="flex items-center justify-between gap-3 mb-3">
             <h3 class="text-sm font-semibold text-slate-300">AI Activity Logs</h3>
             <div class="flex gap-2">
+              <button class="btn btn-secondary btn-xs" id="clearAiChatBtn" type="button">Clear Chat</button>
               <button class="btn btn-secondary btn-xs" id="exportAiLogsBtn" type="button">Export JSON</button>
               <button class="btn btn-danger btn-xs" id="clearAiLogsBtn" type="button">Clear</button>
             </div>
@@ -829,6 +830,8 @@
     const OLD_DASHBOARD_KEY = 'universal-tracker-v2';
     const OLD_CHECKLOG_KEY = 'checklog-app-v1';
     const LLM_CONFIG_KEY = 'make-some-progress-llm-config-v1';
+    const LLM_CHAT_HISTORY_KEY = 'make-some-progress-ai-chat-history-v1';
+    const LLM_CHAT_HISTORY_LIMIT = 100;
     const AI_LOG_KEY = 'make-some-progress-ai-logs-v1';
     const AI_LOG_LIMIT = 200;
     const LLM_REQUEST_TIMEOUT_MS = 30000;
@@ -1619,9 +1622,39 @@
       });
     }
 
+    function loadLlmChatHistory() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(LLM_CHAT_HISTORY_KEY) || '[]');
+        llmChatHistory = Array.isArray(parsed)
+          ? parsed.filter(msg => msg && ['user', 'assistant'].includes(msg.role) && typeof msg.content === 'string').slice(-LLM_CHAT_HISTORY_LIMIT)
+          : [];
+      } catch (e) {
+        llmChatHistory = [];
+      }
+    }
+
+    function saveLlmChatHistory() {
+      try {
+        localStorage.setItem(LLM_CHAT_HISTORY_KEY, JSON.stringify(llmChatHistory.slice(-LLM_CHAT_HISTORY_LIMIT)));
+      } catch (e) {
+        addAiLog('warn', 'chat_history_save_failed', e.message || 'AI chat history could not be saved locally.');
+      }
+    }
+
+    function clearLlmChatHistory() {
+      llmChatHistory = [];
+      pendingAgentConfirmation = null;
+      localStorage.removeItem(LLM_CHAT_HISTORY_KEY);
+      renderLlmChat();
+      addAiLog('info', 'chat_history_cleared', 'AI chat history was cleared on this device.');
+      window.showToast('AI chat history cleared on this device.', 'info');
+    }
+
     function addLlmMessage(role, content) {
       const message = { role, content, ts: new Date().toISOString() };
       llmChatHistory.push(message);
+      if (llmChatHistory.length > LLM_CHAT_HISTORY_LIMIT) llmChatHistory = llmChatHistory.slice(-LLM_CHAT_HISTORY_LIMIT);
+      saveLlmChatHistory();
       addAiLog('info', role === 'user' ? 'chat_user' : 'chat_assistant', content, { role });
       renderLlmChat();
       return message;
@@ -1631,6 +1664,7 @@
       if (!message) return addLlmMessage('assistant', content);
       message.content = content;
       message.ts = new Date().toISOString();
+      saveLlmChatHistory();
       addAiLog('info', message.role === 'user' ? 'chat_user_updated' : 'chat_assistant_updated', content, { role: message.role });
       renderLlmChat();
       return message;
@@ -5541,6 +5575,7 @@
       document.getElementById('saveLlmConfigBtn')?.addEventListener('click', () => { saveLlmConfigFromUI(false); window.showToast('AI settings saved.', 'success'); });
       document.getElementById('testLlmConfigBtn')?.addEventListener('click', testLlmConnection);
       document.getElementById('clearLlmConfigBtn')?.addEventListener('click', clearLlmConfig);
+      document.getElementById('clearAiChatBtn')?.addEventListener('click', clearLlmChatHistory);
       document.getElementById('clearAiLogsBtn')?.addEventListener('click', clearAiLogs);
       document.getElementById('exportAiLogsBtn')?.addEventListener('click', exportAiLogs);
       document.getElementById('llmChatForm')?.addEventListener('submit', handleLlmChatSubmit);
@@ -5568,6 +5603,7 @@
       await initGoogleCalUI();
       await updateCalendarSyncButton();
       updateLlmSettingsUI();
+      loadLlmChatHistory();
       renderLlmChat();
       renderAll();
       const initialTab = window.shouldDefaultToMobileView() ? 'mobile-budget-tab' : 'dashboard-tab';

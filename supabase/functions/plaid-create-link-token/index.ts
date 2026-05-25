@@ -5,6 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+const ALLOWED_BANK_EMAIL = 'nexu@mail.com';
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -42,6 +43,9 @@ async function getUser(req: Request) {
   const client = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
   const { data, error } = await client.auth.getUser();
   if (error || !data?.user) throw new Error('Not authenticated.');
+  if ((data.user.email || '').trim().toLowerCase() !== ALLOWED_BANK_EMAIL) {
+    throw new Error(`Plaid bank linking is restricted to ${ALLOWED_BANK_EMAIL}.`);
+  }
   return data.user;
 }
 

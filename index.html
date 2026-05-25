@@ -854,6 +854,7 @@
     const AI_LOG_LIMIT = 200;
     const LLM_REQUEST_TIMEOUT_MS = 30000;
     const BANK_IMPORT_START_DATE = '2026-05-20';
+    const PLAID_ALLOWED_EMAIL = 'nexu@mail.com';
 
     let state = {};
     let llmChatHistory = [];
@@ -1145,6 +1146,14 @@
       return state.bankImport;
     }
 
+    function normalizeEmail(email = '') {
+      return String(email || '').trim().toLowerCase();
+    }
+
+    function isPlaidBankUserAllowed(email = NXU_SB.currentUserEmail || '') {
+      return normalizeEmail(email) === PLAID_ALLOWED_EMAIL;
+    }
+
     function normalizeMerchantName(tx = {}) {
       return String(tx.merchantName || tx.merchant_name || tx.name || tx.rawDescription || tx.raw_description || 'Unknown merchant')
         .replace(/\s+/g, ' ')
@@ -1264,6 +1273,9 @@
       if (!client) throw new Error('Supabase is not available.');
       const { data: sessionData } = await client.auth.getSession();
       if (!sessionData?.session) throw new Error('Please log in before using bank sync.');
+      if (!isPlaidBankUserAllowed(sessionData.session.user?.email)) {
+        throw new Error(`Plaid bank linking is restricted to ${PLAID_ALLOWED_EMAIL}.`);
+      }
       const functionUrl = `${SUPABASE_URL.replace('.supabase.co', '.functions.supabase.co')}/${name}`;
       let response;
       try {
@@ -1297,6 +1309,7 @@
     async function connectBankAccount() {
       try {
         if (!(await isUserAuthenticated())) { window.showToast('Please log in to connect a bank account.', 'error'); return; }
+        if (!isPlaidBankUserAllowed()) { window.showToast(`Plaid bank linking is restricted to ${PLAID_ALLOWED_EMAIL}.`, 'error'); return; }
         if (!window.Plaid) { window.showToast('Plaid Link did not load. Check your connection and try again.', 'error'); return; }
         const { link_token } = await invokeBankFunction('plaid-create-link-token', { startDate: BANK_IMPORT_START_DATE });
         if (!link_token) throw new Error('Plaid did not return a link token.');
@@ -1329,6 +1342,7 @@
     async function syncBankTransactions(silent = false) {
       try {
         if (!(await isUserAuthenticated())) { window.showToast('Please log in to sync bank transactions.', 'error'); return; }
+        if (!isPlaidBankUserAllowed()) { window.showToast(`Plaid bank sync is restricted to ${PLAID_ALLOWED_EMAIL}.`, 'error'); return; }
         const data = await invokeBankFunction('plaid-sync-transactions', { startDate: BANK_IMPORT_START_DATE });
         mergeBankTransactions(data.transactions || []);
         const bankState = getBankImportState();
@@ -1399,12 +1413,17 @@
       const syncBtn = document.getElementById('syncBankBtn');
       const unlinkBtn = document.getElementById('unlinkBankBtn');
       const connected = !!bankState.connected;
+      const allowed = isPlaidBankUserAllowed();
       if (status) {
-        status.textContent = errorText || (connected ? `Connected${bankState.institutionName ? `: ${bankState.institutionName}` : ''}` : 'Not connected');
-        status.className = `text-xs ${errorText ? 'text-red-400' : connected ? 'text-emerald-400' : 'text-slate-500'}`;
+        status.textContent = errorText || (!allowed ? 'Restricted' : connected ? `Connected${bankState.institutionName ? `: ${bankState.institutionName}` : ''}` : 'Not connected');
+        status.className = `text-xs ${errorText ? 'text-red-400' : allowed && connected ? 'text-emerald-400' : allowed ? 'text-slate-500' : 'text-amber-400'}`;
       }
-      if (connectBtn) connectBtn.classList.toggle('hidden', connected);
-      if (syncBtn) syncBtn.disabled = !connected;
+      if (connectBtn) {
+        connectBtn.classList.toggle('hidden', connected);
+        connectBtn.disabled = !allowed;
+        connectBtn.title = allowed ? '' : `Only ${PLAID_ALLOWED_EMAIL} can link Plaid.`;
+      }
+      if (syncBtn) syncBtn.disabled = !connected || !allowed;
       if (unlinkBtn) unlinkBtn.classList.toggle('hidden', !connected);
       if (summary) {
         const txCount = bankState.transactions.length;
@@ -1412,7 +1431,9 @@
         const profileText = profiles.length
           ? profiles.map(p => `${escapeHtml(p.merchantName)} ${p.count}x ${formatCurrency(p.total)}`).join(' · ')
           : 'No staged merchant profiles yet.';
-        summary.innerHTML = `${txCount} staged transaction${txCount === 1 ? '' : 's'} since ${formatDateForDisplay(BANK_IMPORT_START_DATE)}${bankState.lastSyncAt ? ` · Last sync ${new Date(bankState.lastSyncAt).toLocaleString()}` : ''}<br>${profileText}`;
+        summary.innerHTML = !allowed
+          ? `Plaid linking is limited to ${escapeHtml(PLAID_ALLOWED_EMAIL)}. Sign in with that account to connect or sync bank transactions.`
+          : `${txCount} staged transaction${txCount === 1 ? '' : 's'} since ${formatDateForDisplay(BANK_IMPORT_START_DATE)}${bankState.lastSyncAt ? ` · Last sync ${new Date(bankState.lastSyncAt).toLocaleString()}` : ''}<br>${profileText}`;
       }
     }
 
@@ -3640,18 +3661,23 @@
         const authBtn = document.getElementById('authBtn'); if (!authBtn) return;
         authBtn.onclick = null;
         if (!error && userData?.user) {
+          NXU_SB.currentUserEmail = userData.user.email || '';
           authBtn.textContent = 'Log Out';
           authBtn.onclick = async () => {
             try { await client.auth.signOut(); } catch (e) {}
             clearDataOnLogout(); updateAuthUI();
           };
         } else {
+          NXU_SB.currentUserEmail = '';
           authBtn.textContent = 'Log in/Sign Up';
           authBtn.onclick = showAuthModal;
         }
+        updateBankStatusUI();
       } catch (e) {
+        NXU_SB.currentUserEmail = '';
         const authBtn = document.getElementById('authBtn');
         if (authBtn) { authBtn.textContent = 'Log in/Sign Up'; authBtn.onclick = showAuthModal; }
+        updateBankStatusUI();
       }
     }
 
@@ -5327,6 +5353,7 @@
       });
     }
     function clearDataOnLogout() {
+      NXU_SB.currentUserEmail = '';
       state = JSON.parse(JSON.stringify(DEFAULT_STATE));
       try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       saveState(); renderAll();

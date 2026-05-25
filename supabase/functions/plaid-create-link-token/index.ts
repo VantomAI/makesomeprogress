@@ -31,7 +31,13 @@ async function plaidRequest(path: string, body: Record<string, unknown>) {
     body: JSON.stringify({ client_id: clientId, secret, ...body }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error_message || data?.display_message || `Plaid request failed: ${path}`);
+  if (!res.ok) {
+    const message = data?.error_message || data?.display_message || `Plaid request failed: ${path}`;
+    if (String(message).toLowerCase().includes('data transparency')) {
+      throw new Error('Plaid Link is missing a Data Transparency use case. In Plaid Dashboard, open Link Customization > Data Transparency and select at least one use case, then try again.');
+    }
+    throw new Error(message);
+  }
   return data;
 }
 
@@ -53,14 +59,19 @@ Deno.serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
     const user = await getUser(req);
-    const data = await plaidRequest('/link/token/create', {
+    const linkCustomizationName = (Deno.env.get('PLAID_LINK_CUSTOMIZATION_NAME') || '').trim();
+    const linkTokenRequest: Record<string, unknown> = {
       client_name: 'Make Some Progress',
       country_codes: ['US'],
       language: 'en',
       products: ['transactions'],
       transactions: { days_requested: 730 },
       user: { client_user_id: user.id },
-    });
+    };
+    if (linkCustomizationName) {
+      linkTokenRequest.link_customization_name = linkCustomizationName;
+    }
+    const data = await plaidRequest('/link/token/create', linkTokenRequest);
     return jsonResponse({ link_token: data.link_token, expiration: data.expiration });
   } catch (err) {
     return jsonResponse({ error: err instanceof Error ? err.message : 'Could not create Plaid link token.' }, 400);

@@ -6,7 +6,8 @@ This app uses Plaid through Supabase Edge Functions. The browser app never store
 
 1. Create a Plaid account and enable the Transactions product.
 2. Copy your Plaid `client_id` and Production `secret`.
-3. Confirm SoFi availability during Plaid Link. Plaid institution coverage can change, so Link is the final compatibility check.
+3. In Plaid Dashboard, open Link Customization > Data Transparency and select at least one use case for the Link customization used by this app.
+4. Confirm SoFi availability during Plaid Link. Plaid institution coverage can change, so Link is the final compatibility check.
 
 ## Supabase
 
@@ -21,6 +22,12 @@ supabase secrets set BANK_TOKEN_ENCRYPTION_KEY=use_a_long_random_secret
 ```
 
 For Sandbox testing, use your Sandbox secret and set `PLAID_ENV=sandbox`.
+
+If you create a named Plaid Link customization instead of using the default, also set:
+
+```bash
+supabase secrets set PLAID_LINK_CUSTOMIZATION_NAME=your_link_customization_name
+```
 
 3. Deploy the functions:
 
@@ -56,5 +63,7 @@ The import is additive only. It does not delete check logs, remove expenses, ove
 ## Common Error
 
 If the app says `Bank sync backend is not deployed yet` or `Failed to send a request to the Edge Function`, the browser reached Supabase but the function endpoint is missing. Deploy the four Plaid functions above, then refresh the app and try connecting again.
+
+If Plaid says `At least one data transparency message is required`, the Production Link customization is missing a Data Transparency use case. In Plaid Dashboard, open Link Customization > Data Transparency, select at least one use case, save it, then try again. If you created a named customization, set `PLAID_LINK_CUSTOMIZATION_NAME` in Supabase Secrets and re-create/redeploy `plaid-create-link-token`.
 
 If Supabase says it cannot find `../_shared/bank.ts`, you pasted an older shared-helper version of the function. Use the current self-contained `index.ts` files in `supabase/functions/*/index.ts`.

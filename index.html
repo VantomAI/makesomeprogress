@@ -379,6 +379,7 @@
       <button class="tab-btn active" data-tab="dashboard-tab">Dashboard</button>
       <button class="tab-btn" data-tab="check-logs-tab">Check Logs</button>
       <button class="tab-btn" data-tab="bills-tab">Expenses</button>
+      <button class="tab-btn" data-tab="bank-tab">Bank</button>
       <button class="tab-btn" data-tab="calendar-tab">Calendar</button>
       <button class="tab-btn" data-tab="search-tab">Expense History</button>
       <button class="tab-btn" data-tab="mobile-budget-tab">Mobile Budget</button>
@@ -502,6 +503,35 @@
             <button class="btn btn-primary btn-sm" id="addOneTimeBtn">+ Add One-Time</button>
           </div>
           <div id="oneTimeContainer" class="grid gap-3"></div>
+        </div>
+      </div>
+
+      <!-- Bank Transactions Tab -->
+      <div id="bank-tab" class="tab-content">
+        <div class="card p-5 mb-4">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <h3 class="text-lg font-semibold text-white">Bank Transactions</h3>
+              <p class="text-xs text-slate-400 mt-1">Review Plaid transactions, rename merchants, and remember categories for future imports.</p>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+              <input id="bankTxSearch" type="search" class="text-xs w-52" placeholder="Search transactions...">
+              <select id="bankTxCategoryFilter" class="text-xs w-44">
+                <option value="">All categories</option>
+              </select>
+              <select id="bankTxStatusFilter" class="text-xs w-36">
+                <option value="all">All</option>
+                <option value="new">Not added</option>
+                <option value="applied">Added</option>
+                <option value="ignored">Ignored</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" id="bankTxSyncBtn" type="button">Sync Bank</button>
+            </div>
+          </div>
+          <div id="bankTxSummary" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4"></div>
+        </div>
+        <div class="card p-5">
+          <div id="bankTxList"></div>
         </div>
       </div>
 
@@ -863,7 +893,7 @@
     const DEFAULT_STATE = {
       dashboard: { rows: [], tiles: {}, nextRowId: 1, nextTileId: 1, isEditing: false },
       checkTracker: { bills: [], checkLogs: [], oneTimeExpenses: [] },
-      bankImport: { transactions: [], profiles: {}, lastSyncAt: '', connected: false, institutionName: '' },
+      bankImport: { transactions: [], profiles: {}, rules: {}, lastSyncAt: '', connected: false, institutionName: '' },
       oneTimeExpenseCategoryOverrides: {},
       calendar: { currentDate: new Date().toISOString() },
       appStates: {}
@@ -1060,6 +1090,7 @@
         state.bankImport = state.bankImport || JSON.parse(JSON.stringify(DEFAULT_STATE.bankImport));
         state.bankImport.transactions = state.bankImport.transactions || [];
         state.bankImport.profiles = state.bankImport.profiles || {};
+        state.bankImport.rules = state.bankImport.rules || {};
         state.oneTimeExpenseCategoryOverrides = state.oneTimeExpenseCategoryOverrides || {};
         state.calendar = state.calendar || DEFAULT_STATE.calendar;
         state.appStates = state.appStates || {};
@@ -1095,6 +1126,7 @@
 
       state = JSON.parse(JSON.stringify(DEFAULT_STATE));
       state.bankImport = state.bankImport || JSON.parse(JSON.stringify(DEFAULT_STATE.bankImport));
+      state.bankImport.rules = state.bankImport.rules || {};
       let migrated = false;
       const oldDashboardData = localStorage.getItem(OLD_DASHBOARD_KEY);
       if (oldDashboardData) {
@@ -1143,6 +1175,7 @@
       state.bankImport = state.bankImport || JSON.parse(JSON.stringify(DEFAULT_STATE.bankImport));
       state.bankImport.transactions = state.bankImport.transactions || [];
       state.bankImport.profiles = state.bankImport.profiles || {};
+      state.bankImport.rules = state.bankImport.rules || {};
       return state.bankImport;
     }
 
@@ -1160,26 +1193,63 @@
         .trim();
     }
 
+    function normalizeBankCategory(category, merchantName = '') {
+      const direct = migrateCategory(category);
+      if (direct !== 'Other') return direct;
+      const raw = String(category || '').toUpperCase();
+      if (raw.includes('FOOD') || raw.includes('DINING') || raw.includes('GROCER')) return 'Food & Dining';
+      if (raw.includes('TRANSPORT') || raw.includes('TRAVEL')) return 'Transportation';
+      if (raw.includes('RENT') || raw.includes('HOME') || raw.includes('MORTGAGE')) return 'Housing';
+      if (raw.includes('UTILITY') || raw.includes('TELECOMMUNICATION')) return 'Utilities';
+      if (raw.includes('MEDICAL') || raw.includes('HEALTH')) return 'Health & Medical';
+      if (raw.includes('ENTERTAINMENT')) return 'Entertainment';
+      if (raw.includes('LOAN') || raw.includes('CREDIT')) return 'Debt';
+      if (raw.includes('GENERAL_MERCHANDISE') || raw.includes('SHOP')) return 'Shopping';
+      if (raw.includes('TRANSFER') || raw.includes('SAVING') || raw.includes('INVEST')) return 'Savings/Investment';
+      return autoCategorizeOneTime(merchantName);
+    }
+
+    function getBankRuleKey(tx = {}) {
+      return String(tx.originalMerchantName || tx.original_merchant_name || tx.merchantName || tx.merchant_name || tx.rawDescription || tx.raw_description || tx.name || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+    }
+
+    function applyBankDisplayRule(tx = {}) {
+      const bankState = getBankImportState();
+      const key = getBankRuleKey(tx);
+      const rule = key ? bankState.rules[key] : null;
+      if (!rule) return tx;
+      return {
+        ...tx,
+        merchantName: rule.displayName || tx.merchantName,
+        category: rule.category || tx.category,
+        bankRuleKey: key
+      };
+    }
+
     function normalizeBankTransaction(tx = {}) {
       const id = tx.providerTransactionId || tx.provider_transaction_id || tx.transaction_id || tx.id;
       const date = tx.date || tx.authorized_date || tx.postedDate || tx.posted_date || '';
       const amount = Math.abs(Number(tx.amount) || 0);
       const merchantName = normalizeMerchantName(tx);
-      return {
+      return applyBankDisplayRule({
         id: String(id || `${date}-${merchantName}-${amount}`),
         provider: tx.provider || 'plaid',
         accountId: tx.accountId || tx.account_id || '',
         date,
         postedDate: tx.postedDate || tx.posted_date || date,
+        originalMerchantName: tx.originalMerchantName || tx.original_merchant_name || merchantName,
         merchantName,
         rawDescription: tx.rawDescription || tx.raw_description || tx.name || merchantName,
         amount,
-        category: tx.category || tx.personal_finance_category?.primary || tx.categoryPrimary || tx.category_primary || autoCategorizeOneTime(merchantName),
+        category: normalizeBankCategory(tx.category || tx.personal_finance_category?.primary || tx.categoryPrimary || tx.category_primary, merchantName),
         pending: !!tx.pending,
         ignored: !!tx.ignored,
         appliedLogId: tx.appliedLogId || tx.applied_log_id || null,
         appliedItemId: tx.appliedItemId || tx.applied_item_id || null
-      };
+      });
     }
 
     function buildMerchantProfiles(transactions = []) {
@@ -1203,11 +1273,55 @@
       incoming.map(normalizeBankTransaction).forEach(tx => {
         existing.set(tx.id, { ...(existing.get(tx.id) || {}), ...tx });
       });
-      bankState.transactions = [...existing.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      bankState.transactions = [...existing.values()].map(applyBankDisplayRule).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
       bankState.profiles = buildMerchantProfiles(bankState.transactions);
       bankState.lastSyncAt = new Date().toISOString();
       saveState();
       updateBankStatusUI();
+      renderBankTransactionsTab();
+    }
+
+    function updateBankProfilesAndSave() {
+      const bankState = getBankImportState();
+      bankState.transactions = bankState.transactions.map(applyBankDisplayRule).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      bankState.profiles = buildMerchantProfiles(bankState.transactions);
+      saveState();
+      updateBankStatusUI();
+    }
+
+    async function syncBankTransactionReviewToCloud(tx) {
+      try {
+        const client = getSupabaseClient();
+        if (!client || !(await isUserAuthenticated()) || !isPlaidBankUserAllowed()) return;
+        await client
+          .from('bank_transactions')
+          .update({
+            merchant_name: tx.merchantName,
+            category: tx.category,
+            ignored: !!tx.ignored,
+            applied_log_id: tx.appliedLogId || null,
+            applied_item_id: tx.appliedItemId || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('provider', tx.provider || 'plaid')
+          .eq('provider_transaction_id', tx.id);
+      } catch (err) {
+        console.warn('Could not save bank transaction review fields to Supabase.', err);
+      }
+    }
+
+    function rememberBankTransactionRule(tx, displayName, category) {
+      const key = getBankRuleKey(tx);
+      if (!key) return false;
+      const bankState = getBankImportState();
+      bankState.rules[key] = {
+        displayName: String(displayName || tx.merchantName || '').trim() || tx.merchantName,
+        category: migrateCategory(category || tx.category || 'Other'),
+        updatedAt: new Date().toISOString()
+      };
+      bankState.transactions = bankState.transactions.map(item => getBankRuleKey(item) === key ? applyBankDisplayRule(item) : item);
+      bankState.profiles = buildMerchantProfiles(bankState.transactions);
+      return true;
     }
 
     function isBankTransactionDuplicate(log, tx) {
@@ -1242,14 +1356,15 @@
       if (!bankState.connected && bankState.transactions.length === 0) {
         return `<div class="mt-3 p-3 rounded-lg bg-slate-900/50 border border-slate-700/40 text-xs text-slate-500">Bank import is optional and read-only. Connect in Settings to stage transactions for this check period.</div>`;
       }
-      const rows = suggestions.slice(0, 8).map(tx => `
-        <div class="flex items-center justify-between gap-3 py-1.5 border-b border-slate-800/60 last:border-b-0">
-          <div class="min-w-0">
+      const rows = suggestions.slice(0, 10).map(tx => `
+        <label class="flex items-center justify-between gap-3 py-1.5 border-b border-slate-800/60 last:border-b-0 cursor-pointer">
+          <input type="checkbox" class="bank-review-select accent-emerald-500" data-tx-id="${escapeHtml(tx.id)}" checked>
+          <div class="min-w-0 flex-1">
             <p class="text-xs text-slate-200 truncate">${escapeHtml(tx.merchantName)}</p>
             <p class="text-[11px] text-slate-500">${escapeHtml(formatDateForDisplay(tx.date))}${tx.pending ? ' · pending' : ''}</p>
           </div>
           <span class="text-xs font-semibold text-sky-300">${formatCurrency(tx.amount)}</span>
-        </div>
+        </label>
       `).join('');
       return `
         <div class="bank-review mt-3 p-3 rounded-lg bg-sky-500/5 border border-sky-500/20">
@@ -1260,7 +1375,7 @@
             </div>
             <div class="flex gap-2">
               <button class="btn btn-secondary btn-xs bank-sync-log-btn" type="button">Sync Bank</button>
-              <button class="btn btn-primary btn-xs bank-apply-log-btn" type="button" ${suggestions.length ? '' : 'disabled'}>Add Suggested</button>
+              <button class="btn btn-primary btn-xs bank-apply-log-btn" type="button" ${suggestions.length ? '' : 'disabled'}>Add Selected</button>
             </div>
           </div>
           ${rows ? `<div class="mt-2">${rows}</div>` : '<p class="mt-2 text-[11px] text-slate-500">No new staged expenses for this check period.</p>'}
@@ -1350,6 +1465,7 @@
         bankState.institutionName = data.connection?.institution_name || bankState.institutionName || 'Connected bank';
         saveState();
         renderCheckLogs();
+        renderBankTransactionsTab();
         updateBankStatusUI();
         if (!silent) window.showToast(`Synced ${data.transactions?.length || 0} transaction${(data.transactions?.length || 0) === 1 ? '' : 's'} since 5/20.`, 'success');
       } catch (err) {
@@ -1368,6 +1484,7 @@
           saveState();
           updateBankStatusUI();
           renderCheckLogs();
+          renderBankTransactionsTab();
           window.showToast('Bank account unlinked.', 'success');
         } catch (err) {
           window.showToast(err.message || 'Could not unlink bank account.', 'error');
@@ -1375,10 +1492,11 @@
       });
     }
 
-    function applyBankSuggestionsToLog(log) {
-      const suggestions = getBankSuggestionsForLog(log);
+    function applyBankSuggestionsToLog(log, selectedIds = null) {
+      let suggestions = getBankSuggestionsForLog(log);
+      if (Array.isArray(selectedIds)) suggestions = suggestions.filter(tx => selectedIds.includes(tx.id));
       if (!suggestions.length) {
-        window.showToast('No new bank transactions to add for this check log.', 'info');
+        window.showToast('No selected bank transactions to add for this check log.', 'info');
         return;
       }
       suggestions.forEach(tx => {
@@ -1403,6 +1521,7 @@
       saveState();
       renderAll();
       window.showToast(`Added ${suggestions.length} bank transaction${suggestions.length === 1 ? '' : 's'} to ${log.name}.`, 'success');
+      suggestions.forEach(tx => syncBankTransactionReviewToCloud(tx));
     }
 
     function updateBankStatusUI(errorText = '') {
@@ -1434,6 +1553,129 @@
         summary.innerHTML = !allowed
           ? `Plaid linking is limited to ${escapeHtml(PLAID_ALLOWED_EMAIL)}. Sign in with that account to connect or sync bank transactions.`
           : `${txCount} staged transaction${txCount === 1 ? '' : 's'} since ${formatDateForDisplay(BANK_IMPORT_START_DATE)}${bankState.lastSyncAt ? ` · Last sync ${new Date(bankState.lastSyncAt).toLocaleString()}` : ''}<br>${profileText}`;
+      }
+    }
+
+    function populateBankCategoryFilter() {
+      const select = document.getElementById('bankTxCategoryFilter');
+      if (!select) return;
+      const current = select.value;
+      select.innerHTML = '<option value="">All categories</option>' + BILL_CATEGORIES.map(cat => `<option value="${escapeHtml(cat)}">${escapeHtml(cat)}</option>`).join('');
+      select.value = BILL_CATEGORIES.includes(current) ? current : '';
+    }
+
+    function getFilteredBankTransactions() {
+      const bankState = getBankImportState();
+      const search = String(document.getElementById('bankTxSearch')?.value || '').trim().toLowerCase();
+      const category = document.getElementById('bankTxCategoryFilter')?.value || '';
+      const status = document.getElementById('bankTxStatusFilter')?.value || 'all';
+      return bankState.transactions.filter(tx => {
+        if (search) {
+          const haystack = `${tx.merchantName || ''} ${tx.rawDescription || ''} ${tx.date || ''}`.toLowerCase();
+          if (!haystack.includes(search)) return false;
+        }
+        if (category && migrateCategory(tx.category) !== category) return false;
+        if (status === 'new' && (tx.appliedLogId || tx.ignored)) return false;
+        if (status === 'applied' && !tx.appliedLogId) return false;
+        if (status === 'ignored' && !tx.ignored) return false;
+        return true;
+      });
+    }
+
+    function renderBankTransactionsTab() {
+      populateBankCategoryFilter();
+      const bankState = getBankImportState();
+      const summary = document.getElementById('bankTxSummary');
+      const list = document.getElementById('bankTxList');
+      if (!summary || !list) return;
+      const transactions = getFilteredBankTransactions();
+      const total = bankState.transactions.reduce((sum, tx) => sum + (tx.ignored ? 0 : Number(tx.amount) || 0), 0);
+      const unapplied = bankState.transactions.filter(tx => !tx.ignored && !tx.appliedLogId).length;
+      const ruleCount = Object.keys(bankState.rules || {}).length;
+      summary.innerHTML = [
+        ['Transactions', bankState.transactions.length],
+        ['Unadded', unapplied],
+        ['Reviewed total', formatCurrency(total)],
+        ['Remembered rules', ruleCount]
+      ].map(([label, value]) => `<div class="stat-card"><p class="text-xs text-slate-500">${label}</p><p class="font-semibold text-sm text-white">${value}</p></div>`).join('');
+
+      if (!bankState.transactions.length) {
+        list.innerHTML = '<p class="text-sm text-slate-500">No bank transactions yet. Connect and sync a bank account in Settings.</p>';
+        return;
+      }
+      if (!transactions.length) {
+        list.innerHTML = '<p class="text-sm text-slate-500">No bank transactions match these filters.</p>';
+        return;
+      }
+
+      list.innerHTML = `
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-slate-700 text-slate-500 text-xs">
+                <th class="p-2 text-left">Date</th>
+                <th class="p-2 text-left">Bank Description</th>
+                <th class="p-2 text-left">Name Used In App</th>
+                <th class="p-2 text-left">Category</th>
+                <th class="p-2 text-right">Amount</th>
+                <th class="p-2 text-left">Status</th>
+                <th class="p-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${transactions.map(tx => `
+                <tr class="border-b border-slate-800/80 bank-tx-row ${tx.ignored ? 'opacity-60' : ''}" data-tx-id="${escapeHtml(tx.id)}">
+                  <td class="p-2 text-xs text-slate-400 whitespace-nowrap">${escapeHtml(formatDateForDisplay(tx.date))}</td>
+                  <td class="p-2 min-w-48">
+                    <p class="text-xs text-slate-300">${escapeHtml(tx.rawDescription || tx.merchantName)}</p>
+                    <p class="text-[11px] text-slate-500">${escapeHtml(getBankRuleKey(tx) || 'No rule key')}</p>
+                  </td>
+                  <td class="p-2 min-w-48"><input type="text" class="bank-tx-name text-xs" value="${escapeHtml(tx.merchantName || '')}"></td>
+                  <td class="p-2 min-w-40">
+                    <select class="bank-tx-category text-xs">
+                      ${BILL_CATEGORIES.map(cat => `<option value="${escapeHtml(cat)}" ${migrateCategory(tx.category) === cat ? 'selected' : ''}>${escapeHtml(cat)}</option>`).join('')}
+                    </select>
+                  </td>
+                  <td class="p-2 text-right text-sky-300 font-semibold whitespace-nowrap">${formatCurrency(tx.amount)}</td>
+                  <td class="p-2 text-xs text-slate-400">${tx.ignored ? 'Ignored' : tx.appliedLogId ? 'Added' : 'Not added'}${tx.pending ? ' - pending' : ''}</td>
+                  <td class="p-2">
+                    <div class="flex justify-end gap-2">
+                      <button class="btn btn-primary btn-xs bank-tx-remember-btn" type="button">Remember</button>
+                      <button class="btn btn-secondary btn-xs bank-tx-ignore-btn" type="button">${tx.ignored ? 'Restore' : 'Ignore'}</button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function handleBankTransactionsInteraction(e) {
+      const row = e.target.closest('.bank-tx-row');
+      if (!row) return;
+      const tx = getBankImportState().transactions.find(item => item.id === row.dataset.txId);
+      if (!tx) return;
+      if (e.target.classList.contains('bank-tx-remember-btn')) {
+        const displayName = row.querySelector('.bank-tx-name')?.value || tx.merchantName;
+        const category = row.querySelector('.bank-tx-category')?.value || tx.category;
+        if (!tx.originalMerchantName) tx.originalMerchantName = tx.merchantName;
+        tx.merchantName = String(displayName).trim() || tx.merchantName;
+        tx.category = migrateCategory(category);
+        rememberBankTransactionRule(tx, tx.merchantName, tx.category);
+        updateBankProfilesAndSave();
+        await syncBankTransactionReviewToCloud(tx);
+        renderBankTransactionsTab();
+        renderCheckLogs();
+        window.showToast(`Remembered ${tx.merchantName} for future bank imports.`, 'success');
+      } else if (e.target.classList.contains('bank-tx-ignore-btn')) {
+        tx.ignored = !tx.ignored;
+        updateBankProfilesAndSave();
+        await syncBankTransactionReviewToCloud(tx);
+        renderBankTransactionsTab();
+        renderCheckLogs();
+        window.showToast(tx.ignored ? 'Transaction ignored.' : 'Transaction restored.', 'success');
       }
     }
 
@@ -4401,6 +4643,7 @@
               <div class="flex items-center gap-2 mt-1">
                 <label class="text-xs text-slate-500">Sort:</label>
                 <select class="log-sort-select text-xs w-20">
+                  <option value="manual" ${log.sortBy === 'manual' ? 'selected' : ''}>Manual</option>
                   <option value="bill" ${log.sortBy === 'bill' || !log.sortBy ? 'selected' : ''}>Bill</option>
                   <option value="cost" ${log.sortBy === 'cost' ? 'selected' : ''}>Cost</option>
                   <option value="dueDate" ${log.sortBy === 'dueDate' ? 'selected' : ''}>Due Date</option>
@@ -4512,10 +4755,13 @@
       if (target.classList.contains('bank-sync-log-btn')) {
         syncBankTransactions(false);
       } else if (target.classList.contains('bank-apply-log-btn')) {
-        applyBankSuggestionsToLog(log);
+        const selectedIds = Array.from(logCard.querySelectorAll('.bank-review-select:checked')).map(input => input.dataset.txId);
+        applyBankSuggestionsToLog(log, selectedIds);
       } else if (target.classList.contains('add-item-btn')) {
         const newItemId = log.items.length > 0 ? Math.max(...log.items.map(i => i.id)) + 1 : 1;
         log.items.push({ id: newItemId, bill: 'One-time expense', cost: 0, category: 'Other', dueDate: new Date().toISOString().split('T')[0], paid: false });
+        log.sortBy = 'manual';
+        log.sortOrder = 'asc';
         saveState(); renderCheckLogs();
       } else if (target.classList.contains('delete-log-btn')) {
         showConfirmModal('Delete Check Log', 'Are you sure you want to delete this check log?', () => {
@@ -4524,7 +4770,19 @@
         });
       } else if (target.classList.contains('remove-item-btn')) {
         const itemRow = target.closest('tr[data-item-id]');
-        if (itemRow) { log.items = log.items.filter(i => i.id !== parseInt(itemRow.dataset.itemId)); saveState(); renderCheckLogs(); }
+        if (itemRow) {
+          const removed = log.items.find(i => i.id === parseInt(itemRow.dataset.itemId));
+          if (removed?.bankTransactionId) {
+            const tx = getBankImportState().transactions.find(item => item.id === removed.bankTransactionId);
+            if (tx) {
+              tx.appliedLogId = null;
+              tx.appliedItemId = null;
+              syncBankTransactionReviewToCloud(tx);
+            }
+          }
+          log.items = log.items.filter(i => i.id !== parseInt(itemRow.dataset.itemId));
+          saveState(); renderCheckLogs(); renderBankTransactionsTab();
+        }
       } else if (target.classList.contains('check-amount-input')) {
         log.checkAmount = parseFloat(target.value) || 0; saveState(); updateLogCalculations(log, logCard);
       } else {
@@ -5829,6 +6087,7 @@
       renderBills();
       renderOneTimeExpenses();
       renderCheckLogs();
+      renderBankTransactionsTab();
       renderCalendar();
       renderBillSearch();
       renderAnalytics();
@@ -5913,6 +6172,11 @@
       document.getElementById('addCheckBtn').onclick = addBiWeeklyCheck;
       document.getElementById('checkLogHistory').addEventListener('input', handleCheckLogInteraction);
       document.getElementById('checkLogHistory').addEventListener('click', handleCheckLogInteraction);
+      document.getElementById('bankTxList')?.addEventListener('click', handleBankTransactionsInteraction);
+      document.getElementById('bankTxSearch')?.addEventListener('input', renderBankTransactionsTab);
+      document.getElementById('bankTxCategoryFilter')?.addEventListener('change', renderBankTransactionsTab);
+      document.getElementById('bankTxStatusFilter')?.addEventListener('change', renderBankTransactionsTab);
+      document.getElementById('bankTxSyncBtn')?.addEventListener('click', () => syncBankTransactions(false));
       // Expense history re-renders when time period changes (handled via renderAnalytics -> renderBillSearch)
 
       // Analytics time period

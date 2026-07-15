@@ -352,7 +352,7 @@
     /* Ensure chart.js canvas is responsive */
     .chart-container canvas { max-width: 100% !important; }
   </style>
-  <link rel="stylesheet" href="design-system.css?v=0.37.1"/>
+  <link rel="stylesheet" href="design-system.css?v=0.37.2"/>
   <style id="workspace-shell-critical">
     /* Keep navigation structure intact even if a browser temporarily holds an older stylesheet. */
     @media (min-width: 1101px) {
@@ -376,7 +376,7 @@
         <img src="assets/msp-logo.svg" alt="" class="w-10 h-10 rounded-xl shadow-lg shadow-emerald-500/20" aria-hidden="true">
         <div>
           <h1 class="text-xl sm:text-2xl font-bold text-white tracking-tight">Make Some Progress</h1>
-          <p class="app-subtitle text-xs text-slate-500 hidden sm:block">Financial Dashboard <span class="ml-1 text-emerald-400/80">v0.37.1 &mdash; Design Delivery Fix</span></p>
+          <p class="app-subtitle text-xs text-slate-500 hidden sm:block">Financial Dashboard <span class="ml-1 text-emerald-400/80">v0.37.2 &mdash; Compact Check Logs</span></p>
         </div>
       </div>
       <div class="actions app-actions flex items-center gap-2 flex-wrap">
@@ -404,7 +404,7 @@
       <button class="tab-btn" data-tab="search-tab" data-nav-icon="◷">Expense History</button>
       <button class="tab-btn" data-tab="mobile-budget-tab" data-nav-icon="▯">Mobile Budget</button>
       <button class="tab-btn" data-tab="ai-agent-tab" data-nav-icon="✦">AI Workspace</button>
-      <div class="app-nav-footer hidden"><span>v0.37.1</span><small>Design delivery fix</small></div>
+      <div class="app-nav-footer hidden"><span>v0.37.2</span><small>Compact check logs</small></div>
     </div>
 
     <div id="tab-contents" class="app-main">
@@ -982,7 +982,7 @@
         <div id="patchNotesSection">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
             <h3 class="text-sm font-semibold text-slate-300">Patch Notes</h3>
-            <span class="release-current-badge">Current: v0.37.1</span>
+            <span class="release-current-badge">Current: v0.37.2</span>
           </div>
           <p class="text-xs text-slate-500 mb-3">Open a release to review its improvements, fixes, and quality updates.</p>
           <div id="patchNotesList" class="patch-notes-list"></div>
@@ -1004,6 +1004,22 @@
     const LLM_CHAT_HISTORY_LIMIT = 100;
     const AI_LOG_KEY = 'make-some-progress-ai-logs-v1';
     const RELEASE_NOTES = [
+      {
+        version: 'v0.37.2',
+        title: 'Compact Check Logs',
+        date: 'July 15, 2026',
+        summary: 'Reduces desktop Check Log card height so more of each paycheck period stays visible without sacrificing any fields or actions.',
+        sections: [
+          {
+            title: 'Check Log density',
+            items: [
+              'Moved the check amount into the card header alongside synchronization and delete actions.',
+              'Reduced desktop row, input, notice, action, and summary spacing while keeping values easy to scan.',
+              'Preserved the larger touch-friendly mobile card layout.'
+            ]
+          }
+        ]
+      },
       {
         version: 'v0.37.1',
         title: 'Design Delivery Fix',
@@ -1589,7 +1605,7 @@
       const duplicates = transactions.length - suggestions.length;
       const total = suggestions.reduce((sum, tx) => sum + tx.amount, 0);
       if (!bankState.connected && bankState.transactions.length === 0) {
-        return `<div class="mt-3 p-3 rounded-lg bg-slate-900/50 border border-slate-700/40 text-xs text-slate-500">Bank import is optional and read-only. Connect in Settings to stage transactions for this check period.</div>`;
+        return `<div class="check-log-bank-notice mt-3 p-3 rounded-lg bg-slate-900/50 border border-slate-700/40 text-xs text-slate-500">Bank import is optional and read-only. Connect in Settings to stage transactions for this check period.</div>`;
       }
       const rows = suggestions.slice(0, 10).map(tx => `
         <label class="flex items-center justify-between gap-3 py-1.5 border-b border-slate-800/60 last:border-b-0 cursor-pointer">
@@ -1602,7 +1618,7 @@
         </label>
       `).join('');
       return `
-        <div class="bank-review mt-3 p-3 rounded-lg bg-sky-500/5 border border-sky-500/20">
+        <div class="bank-review check-log-bank-notice mt-3 p-3 rounded-lg bg-sky-500/5 border border-sky-500/20">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
               <p class="text-xs font-semibold text-sky-200">Bank review</p>
@@ -4893,7 +4909,7 @@
         const actualBalance = (Number(log.checkAmount) || 0) - totalPaid;
 
         const card = document.createElement('div');
-        card.className = 'card check-log-card p-5';
+        card.className = 'card check-log-card p-4';
         card.dataset.logId = log.id;
 
         let itemsHtml = log.items.map(item => `
@@ -4909,8 +4925,8 @@
         `).join('');
 
         card.innerHTML = `
-          <div class="flex flex-col sm:flex-row flex-wrap justify-between items-start sm:items-center gap-3 mb-4">
-            <div>
+          <div class="check-log-header flex flex-col lg:flex-row flex-wrap justify-between items-start lg:items-end gap-3 mb-3">
+            <div class="check-log-identity">
               <h3 class="text-base font-semibold text-white flex items-center gap-2">
                 ${log.name}
                 ${log.startDate && log.endDate ? `<span class="text-xs text-slate-500 font-normal">${formatDateForDisplay(log.startDate)} - ${formatDateForDisplay(log.endDate)}</span>` : ''}
@@ -4929,25 +4945,26 @@
                 </select>
               </div>
             </div>
-            <div class="flex items-center gap-2">
-              <button class="btn btn-secondary btn-sm sync-log-btn">Sync Expenses</button>
-              <button class="btn btn-danger btn-sm delete-log-btn">Delete Log</button>
+            <div class="check-log-tools flex flex-wrap items-end gap-2">
+              <label class="check-log-amount text-xs text-slate-500">Check Amount
+                <input type="number" class="check-amount-input text-sm mt-1" value="${log.checkAmount || ''}">
+              </label>
+              <div class="check-log-actions flex items-center gap-2">
+                <button class="btn btn-secondary btn-sm sync-log-btn">Sync Expenses</button>
+                <button class="btn btn-danger btn-sm delete-log-btn">Delete Log</button>
+              </div>
             </div>
           </div>
-          <div class="mb-4 max-w-xs">
-            <label class="text-xs text-slate-500 mb-1 block">Check Amount:</label>
-            <input type="number" class="check-amount-input text-sm" value="${log.checkAmount || ''}">
-          </div>
-          <div class="overflow-x-auto">
+          <div class="check-log-table-wrap overflow-x-auto">
             <table class="w-full text-sm check-log-table">
               <thead><tr class="border-b border-slate-700 text-slate-500 text-xs"><th class="p-2 text-left">Paid</th><th class="p-2 text-left">Bill</th><th class="p-2 text-left">Cost</th><th class="p-2 text-left">Due Date</th><th class="p-2 text-right hidden sm:table-cell">Paid Total</th><th class="p-2 text-right hidden sm:table-cell">Balance</th><th></th></tr></thead>
               <tbody>${itemsHtml}</tbody>
             </table>
           </div>
-          <div class="mt-3"><button class="btn btn-secondary btn-sm add-item-btn">+ Add One-Time Bill</button></div>
+          <div class="check-log-add mt-2"><button class="btn btn-secondary btn-sm add-item-btn">+ Add One-Time Bill</button></div>
           <p class="schedule-assurance"><span aria-hidden="true">&#10003;</span> Recurring and one-time expenses due from ${formatDateForDisplay(log.startDate)} through ${formatDateForDisplay(log.endDate)} are included automatically.</p>
           ${renderBankReviewForLog(log)}
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-700/50">
+          <div class="check-log-summary grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-700/50">
             <div class="stat-card"><p class="text-xs text-slate-500">Projected</p><p class="font-semibold text-sm projected-spending">${formatCurrency(projectedSpending)}</p></div>
             <div class="stat-card"><p class="text-xs text-slate-500">Proj. Balance</p><p class="font-semibold text-sm ${projectedBalance >= 0 ? 'text-emerald-400' : 'text-red-400'} projected-balance">${formatCurrency(projectedBalance)}</p></div>
             <div class="stat-card"><p class="text-xs text-slate-500">Total Paid</p><p class="font-semibold text-sm total-paid">${formatCurrency(totalPaid)}</p></div>

@@ -11,6 +11,7 @@
   <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="bill-scheduler.js"></script>
+  <script src="savings-forecast.js"></script>
 
   <script>
     window.FORCE_MOBILE_VIEW = window.FORCE_MOBILE_VIEW === true;
@@ -360,7 +361,7 @@
         <img src="assets/msp-logo.svg" alt="" class="w-10 h-10 rounded-xl shadow-lg shadow-emerald-500/20" aria-hidden="true">
         <div>
           <h1 class="text-xl sm:text-2xl font-bold text-white tracking-tight">Make Some Progress</h1>
-          <p class="text-xs text-slate-500 hidden sm:block">Financial Dashboard <span class="ml-1 text-emerald-400/80">v0.34 &mdash; Scheduling Reliability</span></p>
+          <p class="text-xs text-slate-500 hidden sm:block">Financial Dashboard <span class="ml-1 text-emerald-400/80">v0.36 &mdash; Savings Forecast</span></p>
         </div>
       </div>
       <div class="actions flex items-center gap-2 flex-wrap">
@@ -383,6 +384,7 @@
       <button class="tab-btn" data-tab="bills-tab">Expenses</button>
       <button class="tab-btn" data-tab="bank-tab">Bank</button>
       <button class="tab-btn" data-tab="calendar-tab">Calendar</button>
+      <button class="tab-btn" data-tab="savings-forecast-tab">Savings Forecast</button>
       <button class="tab-btn" data-tab="search-tab">Expense History</button>
       <button class="tab-btn" data-tab="mobile-budget-tab">Mobile Budget</button>
       <button class="tab-btn" data-tab="ai-agent-tab">AI Workspace</button>
@@ -557,6 +559,93 @@
           </div>
           <div id="calendar"></div>
         </div>
+      </div>
+
+      <!-- Savings Forecast Tab -->
+      <div id="savings-forecast-tab" class="tab-content">
+        <section class="savings-hero card p-5 mb-4">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="savings-icon" aria-hidden="true">$</span>
+                <h3 class="text-lg font-semibold text-white">Savings Forecast</h3>
+              </div>
+              <p class="text-xs text-slate-400">Plan each contribution, record what actually moved, and see when your balance should reach each milestone.</p>
+            </div>
+            <div class="flex flex-wrap items-end gap-2">
+              <label class="text-xs text-slate-400">Forecast year
+                <input id="savingsYear" type="number" min="2000" max="2200" class="mt-1 w-24" aria-label="Savings forecast year">
+              </label>
+              <button id="addSavingsContributionBtn" class="btn btn-secondary btn-sm" type="button">+ Contribution</button>
+              <button id="addSavingsGoalBtn" class="btn btn-primary btn-sm" type="button">+ Goal</button>
+            </div>
+          </div>
+          <div id="savingsKpis" class="savings-kpi-grid mt-5"></div>
+        </section>
+
+        <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,.75fr)] gap-4 mb-4">
+          <section class="card p-5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div>
+                <h4 class="text-sm font-semibold text-slate-200">Goal Milestones</h4>
+                <p class="text-xs text-slate-500 mt-1">Milestones use the same total savings balance.</p>
+              </div>
+              <span id="savingsGoalSummary" class="text-xs text-emerald-300"></span>
+            </div>
+            <div id="savingsGoals" class="space-y-3"></div>
+          </section>
+
+          <section class="card p-5">
+            <h4 class="text-sm font-semibold text-slate-200 mb-1">Balance Adjustments</h4>
+            <p class="text-xs text-slate-500 mb-4">Include money already saved and changes outside the planned contribution list.</p>
+            <div class="savings-adjustment-grid">
+              <label>Starting balance<input id="savingsStartingBalance" type="number" step="0.01" inputmode="decimal"></label>
+              <label>Additional money in<input id="savingsAdditionalIn" type="number" step="0.01" inputmode="decimal"></label>
+              <label>Additional money out<input id="savingsAdditionalOut" type="number" min="0" step="0.01" inputmode="decimal"></label>
+            </div>
+            <div id="savingsNetAdjustment" class="savings-net-adjustment mt-4"></div>
+          </section>
+        </div>
+
+        <section class="card p-5 mb-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+            <div>
+              <h4 class="text-sm font-semibold text-slate-200">Year Timeline</h4>
+              <p id="savingsTimelineCaption" class="text-xs text-slate-500 mt-1"></p>
+            </div>
+            <span id="savingsPendingCount" class="savings-status-pill"></span>
+          </div>
+          <div class="savings-time-track" aria-hidden="true"><span id="savingsTimeFill"></span><i id="savingsTodayMarker"></i></div>
+          <div class="savings-time-labels"><span>Jan 1</span><span id="savingsTodayLabel">Today</span><span>Dec 31</span></div>
+          <div id="savingsMonthGrid" class="savings-month-grid mt-5"></div>
+        </section>
+
+        <section class="card p-5 mb-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+            <div>
+              <h4 class="text-sm font-semibold text-slate-200">Running Savings Forecast</h4>
+              <p class="text-xs text-slate-500 mt-1">Actual deposits anchor the forecast; pending deposits use their planned amount.</p>
+            </div>
+            <div class="savings-chart-legend" aria-hidden="true"><span class="actual">Actual</span><span class="projected">Projected</span><span class="planned">Original plan</span></div>
+          </div>
+          <div class="savings-chart-wrap"><canvas id="savingsForecastChart"></canvas></div>
+        </section>
+
+        <section class="card p-5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+            <div>
+              <h4 class="text-sm font-semibold text-slate-200">Contribution Plan</h4>
+              <p class="text-xs text-slate-500 mt-1">Leave Actual blank until a transfer happens, or check Done to use the planned amount.</p>
+            </div>
+            <span class="text-xs text-slate-500">Saved with the dashboard</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="savings-contribution-table w-full text-sm">
+              <thead><tr><th>Done</th><th>Month</th><th>Contribution</th><th class="text-right">Planned</th><th class="text-right">Actual</th><th class="text-right">Variance</th><th><span class="sr-only">Remove</span></th></tr></thead>
+              <tbody id="savingsContributionBody"></tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
       <!-- Bill History Tab -->
@@ -867,6 +956,14 @@
             <div id="aiLogsList" class="max-h-72 overflow-y-auto space-y-2 text-xs"></div>
           </div>
         </div>
+        <div id="patchNotesSection">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+            <h3 class="text-sm font-semibold text-slate-300">Patch Notes</h3>
+            <span class="release-current-badge">Current: v0.35</span>
+          </div>
+          <p class="text-xs text-slate-500 mb-3">Open a release to review its improvements, fixes, and quality updates.</p>
+          <div id="patchNotesList" class="patch-notes-list"></div>
+        </div>
       </div>
       <div class="flex justify-end mt-6">
         <button class="btn btn-secondary" onclick="hideSettingsModal()">Close</button>
@@ -883,6 +980,117 @@
     const LLM_CHAT_HISTORY_KEY = 'make-some-progress-ai-chat-history-v1';
     const LLM_CHAT_HISTORY_LIMIT = 100;
     const AI_LOG_KEY = 'make-some-progress-ai-logs-v1';
+    const RELEASE_NOTES = [
+      {
+        version: 'v0.36',
+        title: 'Savings Forecast',
+        date: 'July 15, 2026',
+        summary: 'Brings the House Fund savings calendar into the financial dashboard as a goal-based annual forecast.',
+        sections: [
+          {
+            title: 'Savings planning',
+            items: [
+              'Added a dedicated Savings Forecast tab using the existing House Fund contribution schedule.',
+              'Added editable goals, target dates, annual contributions, actual transfers, and balance adjustments.',
+              'Added deterministic actual, planned, and projected totals with goal gaps and estimated milestone timing.',
+              'Added monthly timeline cards and a cumulative forecast chart for the selected year.'
+            ]
+          },
+          {
+            title: 'Reliability and integration',
+            items: [
+              'Savings data now uses the dashboard save model and is included in local storage, exports, imports, and cloud sync.',
+              'Pending transfers remain visually distinct and use planned amounts only for projections.',
+              'Added data normalization and calculation tests for totals, goal timing, edits, and year progress.'
+            ]
+          },
+          {
+            title: 'Design and usability',
+            items: [
+              'Matched the current dashboard color, card, form, navigation, and responsive design system.',
+              'Added mobile layouts for goal controls, monthly cards, and editable contribution rows.'
+            ]
+          }
+        ]
+      },
+      {
+        version: 'v0.35',
+        title: 'Release Notes',
+        date: 'July 15, 2026',
+        summary: 'Adds an in-app, expandable history of recent releases.',
+        sections: [
+          {
+            title: 'Release history',
+            items: [
+              'Added a Patch Notes section at the bottom of Settings.',
+              'Each documented release can be opened independently to review its changes.',
+              'The newest release opens by default and the current version is clearly identified.',
+              'Release content now uses a reusable data structure so future notes can be added consistently.'
+            ]
+          },
+          {
+            title: 'Design and usability',
+            items: [
+              'Matched release cards to the existing modern Settings design.',
+              'Added responsive spacing, readable section headings, and keyboard-accessible native disclosure controls.'
+            ]
+          }
+        ]
+      },
+      {
+        version: 'v0.34',
+        title: 'Scheduling Reliability',
+        date: 'July 15, 2026',
+        summary: 'Makes Check Log scheduling reliable and refreshes the application design.',
+        sections: [
+          {
+            title: 'Bill scheduling',
+            items: [
+              'Fixed expenses missing from Check Logs even when their due dates fell inside the displayed check period.',
+              'Made check-period boundaries inclusive.',
+              'Allowed weekly and biweekly expenses to appear multiple times within one check period when appropriate.',
+              'Corrected month-end recurrence drift for due dates such as the 29th, 30th, or 31st.',
+              'Ensured overlapping Check Logs independently include every applicable expense.'
+            ]
+          },
+          {
+            title: 'Expense synchronization',
+            items: [
+              'Changes made in the Expenses tab now update active and future Check Logs automatically.',
+              'Recurring and one-time expenses now use the same scheduling system.',
+              'Changing a due date moves its unpaid scheduled entry, while amount and category changes propagate safely.',
+              'Paid records are preserved during schedule changes.',
+              'Added a manual Sync Expenses button and startup repair for existing Check Logs.'
+            ]
+          },
+          {
+            title: 'One-time expenses',
+            items: [
+              'One-time expenses are automatically included in eligible Check Logs.',
+              'Existing one-time expenses can be reopened and edited.',
+              'Updated dates, amounts, and categories synchronize with Check Logs.',
+              'Prevented paid one-time expenses from appearing twice in the Expenses tab.'
+            ]
+          },
+          {
+            title: 'Design and usability',
+            items: [
+              'Refreshed the color system, cards, forms, buttons, navigation, modals, tables, calendar, and analytics views.',
+              'Improved desktop spacing and visual hierarchy.',
+              'Rebuilt mobile Check Log rows as compact cards without hiding the bill name, cost, or due date.',
+              'Added clearer scheduling-status messaging, keyboard focus indicators, and reduced-motion support.'
+            ]
+          },
+          {
+            title: 'Quality',
+            items: [
+              'Added 13 automated regression tests covering recurrence intervals, boundary dates, overlapping checks, expense edits, paid history, and script integrity.',
+              'Published and verified the release through GitHub Pages.'
+            ]
+          }
+        ]
+      }
+    ];
     const AI_LOG_LIMIT = 200;
     const LLM_REQUEST_TIMEOUT_MS = 30000;
     const BANK_IMPORT_START_DATE = '2026-05-20';
@@ -898,6 +1106,7 @@
       bankImport: { transactions: [], profiles: {}, rules: {}, lastSyncAt: '', connected: false, institutionName: '' },
       oneTimeExpenseCategoryOverrides: {},
       calendar: { currentDate: new Date().toISOString() },
+      savingsForecast: SavingsForecast.createDefaultState(2026),
       appStates: {}
     };
 
@@ -1055,6 +1264,7 @@
         state.bankImport.rules = state.bankImport.rules || {};
         state.oneTimeExpenseCategoryOverrides = state.oneTimeExpenseCategoryOverrides || {};
         state.calendar = state.calendar || DEFAULT_STATE.calendar;
+        state.savingsForecast = SavingsForecast.normalizeState(state.savingsForecast, 2026);
         state.appStates = state.appStates || {};
         state.dashboard.isEditing = false;
 
@@ -3878,6 +4088,7 @@
         if (error) { if (!isAutoSync) alert('Failed to fetch data.'); return; }
         if (data?.data) {
           state = data.data;
+          state.savingsForecast = SavingsForecast.normalizeState(state.savingsForecast, 2026);
           state.checkTracker.bills.forEach(bill => { bill.category = migrateCategory(bill.category); });
           reconcileOpenCheckLogs();
           saveState(); renderAll();
@@ -5762,8 +5973,37 @@
       updateLlmSettingsUI();
       updateBankStatusUI();
       renderAiLogs();
+      renderPatchNotes();
       const modal = document.getElementById('settingsModal');
       modal.classList.remove('hidden'); modal.classList.add('flex');
+    }
+
+    function renderPatchNotes() {
+      const container = document.getElementById('patchNotesList');
+      if (!container) return;
+      container.innerHTML = RELEASE_NOTES.map((release, releaseIndex) => `
+        <details class="patch-note-release" ${releaseIndex === 0 ? 'open' : ''}>
+          <summary class="patch-note-summary">
+            <span class="patch-note-heading">
+              <span class="patch-note-version">${escapeHtml(release.version)}</span>
+              <span>
+                <span class="patch-note-title">${escapeHtml(release.title)}</span>
+                <span class="patch-note-date">${escapeHtml(release.date)}</span>
+              </span>
+            </span>
+            <span class="patch-note-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="patch-note-content">
+            <p class="patch-note-summary-text">${escapeHtml(release.summary)}</p>
+            ${release.sections.map(section => `
+              <section class="patch-note-section">
+                <h4>${escapeHtml(section.title)}</h4>
+                <ul>${section.items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
+              </section>
+            `).join('')}
+          </div>
+        </details>
+      `).join('');
     }
 
     function hideSettingsModal() {
@@ -6092,6 +6332,245 @@
       }
     }
 
+    // ===================== SAVINGS FORECAST =====================
+    let savingsForecastChartInstance = null;
+    let savingsCloudSaveTimer = null;
+
+    function getSavingsForecastState() {
+      state.savingsForecast = SavingsForecast.normalizeState(state.savingsForecast, 2026);
+      return state.savingsForecast;
+    }
+
+    function persistSavingsForecast(options = {}) {
+      saveState();
+      if (options.cloud === false) return;
+      clearTimeout(savingsCloudSaveTimer);
+      savingsCloudSaveTimer = setTimeout(() => saveDataToCloud({ silent: true }), 750);
+    }
+
+    function savingsMoney(value, digits = 0) {
+      return (Number(value) || 0).toLocaleString('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits
+      });
+    }
+
+    function savingsSignedMoney(value) {
+      const amount = Number(value) || 0;
+      if (amount === 0) return savingsMoney(0);
+      return `${amount > 0 ? '+' : '-'}${savingsMoney(Math.abs(amount))}`;
+    }
+
+    function renderSavingsGoals(forecast) {
+      const container = document.getElementById('savingsGoals');
+      if (!container) return;
+      const active = forecast.goalStatuses.find(goal => goal.id === forecast.data.activeGoalId) || forecast.goalStatuses[0];
+      document.getElementById('savingsGoalSummary').textContent = active
+        ? `${Math.max(0, active.actualPercent).toFixed(0)}% of ${active.name} saved`
+        : '';
+
+      container.innerHTML = forecast.goalStatuses.map(goal => {
+        const actualPct = Math.min(100, Math.max(0, goal.actualPercent));
+        const projectedPct = Math.min(100, Math.max(0, goal.projectedPercent));
+        const hitText = goal.projectedHit
+          ? (goal.projectedHit.month === null ? 'Already funded by starting balance' : `Projected to reach in ${SavingsForecast.MONTHS[goal.projectedHit.month]}`)
+          : `${savingsMoney(goal.projectedGap)} projected gap`;
+        return `
+          <article class="savings-goal-card ${goal.id === forecast.data.activeGoalId ? 'active' : ''}" data-goal-id="${escapeHtml(goal.id)}">
+            <div class="savings-goal-fields">
+              <label>Goal name<input data-savings-goal-field="name" value="${escapeHtml(goal.name)}" aria-label="Goal name"></label>
+              <label>Target amount<input data-savings-goal-field="target" type="number" min="0" step="100" value="${goal.target}" aria-label="Target amount"></label>
+              <label>Target date<input data-savings-goal-field="targetDate" type="date" value="${escapeHtml(goal.targetDate)}" aria-label="Target date"></label>
+              <div class="flex gap-2">
+                <button class="btn btn-secondary btn-xs" data-savings-goal-action="activate" type="button" ${goal.id === forecast.data.activeGoalId ? 'disabled' : ''}>${goal.id === forecast.data.activeGoalId ? 'Tracking' : 'Track'}</button>
+                <button class="btn btn-danger btn-xs" data-savings-goal-action="remove" type="button" ${forecast.goalStatuses.length === 1 ? 'disabled' : ''} aria-label="Remove ${escapeHtml(goal.name)}">&times;</button>
+              </div>
+            </div>
+            <div class="savings-goal-track" aria-label="${actualPct.toFixed(0)} percent saved, ${projectedPct.toFixed(0)} percent projected">
+              <span class="projected" style="width:${projectedPct}%"></span>
+              <span class="actual" style="width:${actualPct}%"></span>
+            </div>
+            <div class="savings-goal-meta"><span><strong>${savingsMoney(forecast.actualTotal)}</strong> saved of ${savingsMoney(goal.target)}</span><span>${hitText}</span></div>
+          </article>`;
+      }).join('');
+    }
+
+    function renderSavingsMonths(forecast) {
+      const grid = document.getElementById('savingsMonthGrid');
+      if (!grid) return;
+      grid.innerHTML = forecast.months.map(month => `
+        <article class="savings-month-card ${month.entries.length ? '' : 'empty'}">
+          <header><strong>${month.name}</strong><span>${savingsMoney(month.projected)}</span></header>
+          ${month.entries.length ? month.entries.map(item => `
+            <label class="savings-month-entry ${item.bonus ? 'bonus' : ''}">
+              <input type="checkbox" data-savings-toggle="${escapeHtml(item.id)}" ${item.actual !== null ? 'checked' : ''} aria-label="Mark ${escapeHtml(item.label)} complete">
+              <div><b title="${escapeHtml(item.label)}">${escapeHtml(item.label)}</b><small>${item.actual === null ? 'Pending' : `Actual ${savingsMoney(item.actual)}`}</small></div>
+              <span>${savingsMoney(item.actual ?? item.planned)}</span>
+            </label>`).join('') : '<p class="text-xs text-slate-600 pt-3">No contributions planned</p>'}
+        </article>`).join('');
+    }
+
+    function renderSavingsContributionTable(forecast) {
+      const body = document.getElementById('savingsContributionBody');
+      if (!body) return;
+      body.innerHTML = forecast.timeline.map(item => {
+        const variance = item.actual === null ? null : item.actual - item.planned;
+        const varianceClass = variance === null ? '' : (variance >= 0 ? 'positive' : 'negative');
+        return `
+          <tr data-saving-id="${escapeHtml(item.id)}">
+            <td data-label="Done"><input type="checkbox" data-savings-field="done" ${item.actual !== null ? 'checked' : ''} aria-label="Mark ${escapeHtml(item.label)} complete"></td>
+            <td data-label="Month"><select data-savings-field="month" aria-label="Month for ${escapeHtml(item.label)}">${SavingsForecast.MONTHS.map((name, index) => `<option value="${index}" ${index === item.month ? 'selected' : ''}>${name}</option>`).join('')}</select></td>
+            <td data-label="Contribution"><input data-savings-field="label" value="${escapeHtml(item.label)}" aria-label="Contribution name"></td>
+            <td data-label="Planned" class="money-cell"><input data-savings-field="planned" type="number" min="0" step="0.01" value="${item.planned}" aria-label="Planned amount"></td>
+            <td data-label="Actual" class="money-cell"><input data-savings-field="actual" type="number" step="0.01" value="${item.actual ?? ''}" placeholder="Pending" aria-label="Actual amount"></td>
+            <td data-label="Variance" class="variance ${varianceClass}">${variance === null ? 'Pending' : savingsSignedMoney(variance)}</td>
+            <td data-label=""><button class="btn btn-danger btn-xs" data-savings-action="remove" type="button" aria-label="Remove ${escapeHtml(item.label)}">&times;</button></td>
+          </tr>`;
+      }).join('');
+    }
+
+    function renderSavingsChart(forecast) {
+      const canvas = document.getElementById('savingsForecastChart');
+      const tab = document.getElementById('savings-forecast-tab');
+      if (!canvas || !tab?.classList.contains('active') || typeof Chart === 'undefined') return;
+
+      const labels = forecast.timeline.map((item, index) => {
+        const monthEntries = forecast.timeline.filter(other => other.month === item.month);
+        const inMonthIndex = forecast.timeline.slice(0, index + 1).filter(other => other.month === item.month).length;
+        return `${SavingsForecast.MONTHS[item.month].slice(0, 3)}${monthEntries.length > 1 ? ` ${inMonthIndex}` : ''}`;
+      });
+      const data = {
+        labels,
+        datasets: [
+          {
+            label: 'Actual',
+            data: forecast.timeline.map(item => item.actual === null ? null : item.actualRunning),
+            borderColor: '#2dd4a8', backgroundColor: 'rgba(45,212,168,.12)', pointBackgroundColor: '#2dd4a8',
+            borderWidth: 2.5, pointRadius: 3, tension: 0.28, spanGaps: false
+          },
+          {
+            label: 'Projected',
+            data: forecast.timeline.map(item => item.projectedRunning),
+            borderColor: '#60a5fa', backgroundColor: 'transparent', pointBackgroundColor: '#60a5fa',
+            borderWidth: 2, borderDash: [7, 4], pointRadius: 2, tension: 0.28
+          },
+          {
+            label: 'Original plan',
+            data: forecast.timeline.map(item => item.plannedRunning),
+            borderColor: 'rgba(148,163,184,.55)', backgroundColor: 'transparent', pointRadius: 0,
+            borderWidth: 1.5, borderDash: [2, 5], tension: 0.28
+          }
+        ]
+      };
+
+      if (savingsForecastChartInstance) {
+        savingsForecastChartInstance.data = data;
+        savingsForecastChartInstance.update('none');
+        return;
+      }
+
+      savingsForecastChartInstance = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: context => context.parsed.y === null ? null : `${context.dataset.label}: ${savingsMoney(context.parsed.y)}` } }
+          },
+          scales: {
+            x: { grid: { color: 'rgba(137,166,204,.08)' }, ticks: { color: '#91a4be', maxRotation: 45 } },
+            y: { grid: { color: 'rgba(137,166,204,.08)' }, ticks: { color: '#91a4be', callback: value => savingsMoney(value) } }
+          }
+        }
+      });
+    }
+
+    function renderSavingsForecast() {
+      const root = document.getElementById('savings-forecast-tab');
+      if (!root) return;
+      const forecast = SavingsForecast.calculateForecast(getSavingsForecastState());
+      state.savingsForecast = forecast.data;
+
+      const kpis = document.getElementById('savingsKpis');
+      const activeGoal = forecast.goalStatuses.find(goal => goal.id === forecast.data.activeGoalId) || forecast.goalStatuses[0];
+      kpis.innerHTML = [
+        { label: 'Actual saved', value: savingsMoney(forecast.actualTotal), detail: 'Transferred plus adjustments', accent: true },
+        { label: 'Projected year end', value: savingsMoney(forecast.projectedTotal), detail: `${forecast.pendingCount} pending contribution${forecast.pendingCount === 1 ? '' : 's'}` },
+        { label: 'Original plan', value: savingsMoney(forecast.plannedTotal), detail: 'Before actual variances' },
+        { label: activeGoal ? `${activeGoal.name} gap` : 'Goal gap', value: savingsMoney(activeGoal?.actualGap || 0), detail: activeGoal?.projectedGap ? `${savingsMoney(activeGoal.projectedGap)} after forecast` : 'Forecast fully funds this goal' }
+      ].map(item => `<div class="savings-kpi ${item.accent ? 'accent' : ''}"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong><small>${escapeHtml(item.detail)}</small></div>`).join('');
+
+      const yearInput = document.getElementById('savingsYear');
+      if (document.activeElement !== yearInput) yearInput.value = forecast.data.year;
+      const adjustmentFields = [
+        ['savingsStartingBalance', forecast.data.startingBalance],
+        ['savingsAdditionalIn', forecast.data.additionalIn],
+        ['savingsAdditionalOut', forecast.data.additionalOut]
+      ];
+      adjustmentFields.forEach(([id, value]) => {
+        const input = document.getElementById(id);
+        if (input && document.activeElement !== input) input.value = value;
+      });
+      document.getElementById('savingsNetAdjustment').innerHTML = `Net opening impact <strong>${savingsSignedMoney(forecast.openingNet)}</strong>`;
+
+      const yearProgress = SavingsForecast.calculateYearProgress(forecast.data.year, new Date());
+      document.getElementById('savingsTimeFill').style.width = `${yearProgress}%`;
+      document.getElementById('savingsTodayMarker').style.left = `${yearProgress}%`;
+      document.getElementById('savingsTodayLabel').textContent = yearProgress <= 0 ? 'Year not started' : (yearProgress >= 100 ? 'Year complete' : `${Math.round(yearProgress)}% through year`);
+      document.getElementById('savingsTimelineCaption').textContent = `${forecast.data.year} plan from January through December`;
+      document.getElementById('savingsPendingCount').textContent = `${forecast.pendingCount} pending`;
+
+      renderSavingsGoals(forecast);
+      renderSavingsMonths(forecast);
+      renderSavingsContributionTable(forecast);
+      renderSavingsChart(forecast);
+    }
+
+    function updateSavingsForecastFromControl(target) {
+      const data = getSavingsForecastState();
+      const id = target.closest('[data-saving-id]')?.dataset.savingId;
+      const goalId = target.closest('[data-goal-id]')?.dataset.goalId;
+
+      if (target.id === 'savingsYear') {
+        const oldYear = data.year;
+        const newYear = Math.min(2200, Math.max(2000, Number(target.value) || oldYear));
+        data.year = newYear;
+        data.goals.forEach(goal => {
+          if (String(goal.targetDate).startsWith(`${oldYear}-`)) goal.targetDate = `${newYear}${goal.targetDate.slice(4)}`;
+        });
+      } else if (target.id === 'savingsStartingBalance') data.startingBalance = Number(target.value) || 0;
+      else if (target.id === 'savingsAdditionalIn') data.additionalIn = Number(target.value) || 0;
+      else if (target.id === 'savingsAdditionalOut') data.additionalOut = Math.max(0, Number(target.value) || 0);
+      else if (goalId && target.dataset.savingsGoalField) {
+        const goal = data.goals.find(item => item.id === goalId);
+        if (!goal) return;
+        if (target.dataset.savingsGoalField === 'target') goal.target = Math.max(0, Number(target.value) || 0);
+        else goal[target.dataset.savingsGoalField] = target.value;
+      } else if (id && target.dataset.savingsField) {
+        const item = data.contributions.find(entry => entry.id === id);
+        if (!item) return;
+        const field = target.dataset.savingsField;
+        if (field === 'done') item.actual = target.checked ? item.planned : null;
+        else if (field === 'month') item.month = Number(target.value);
+        else if (field === 'planned') item.planned = Math.max(0, Number(target.value) || 0);
+        else if (field === 'actual') item.actual = target.value === '' ? null : Number(target.value) || 0;
+        else item[field] = target.value;
+      } else if (target.dataset.savingsToggle) {
+        const item = data.contributions.find(entry => entry.id === target.dataset.savingsToggle);
+        if (!item) return;
+        item.actual = target.checked ? item.planned : null;
+      } else return;
+
+      state.savingsForecast = SavingsForecast.normalizeState(data, data.year);
+      persistSavingsForecast();
+      renderSavingsForecast();
+    }
+
     // ===================== MAIN RENDER =====================
     function renderAll() {
       renderDashboard();
@@ -6102,6 +6581,7 @@
       renderCalendar();
       renderBillSearch();
       renderAnalytics();
+      renderSavingsForecast();
     }
 
     // ===================== INIT =====================
@@ -6124,6 +6604,7 @@
         document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
         targetButton.classList.add('active'); targetContent.classList.add('active');
         if (tabId === 'search-tab') setTimeout(renderAnalytics, 50);
+        if (tabId === 'savings-forecast-tab') setTimeout(renderSavingsForecast, 50);
         if (persistPreference) {
           if (tabId === 'mobile-budget-tab') window.setPreferredBudgetView('mobile');
           else if (tabId === 'dashboard-tab') window.setPreferredBudgetView('desktop');
@@ -6132,6 +6613,59 @@
 
       document.querySelector('.tabs').addEventListener('click', e => {
         if (e.target.classList.contains('tab-btn')) setActiveTab(e.target.dataset.tab, { persistPreference: true });
+      });
+
+      const savingsRoot = document.getElementById('savings-forecast-tab');
+      savingsRoot?.addEventListener('change', event => {
+        if (event.target.matches('select, input[type="checkbox"]')) updateSavingsForecastFromControl(event.target);
+      });
+      savingsRoot?.addEventListener('focusout', event => {
+        if (event.target.matches('input:not([type="checkbox"])')) updateSavingsForecastFromControl(event.target);
+      });
+      savingsRoot?.addEventListener('click', event => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        const data = getSavingsForecastState();
+
+        if (button.id === 'addSavingsContributionBtn') {
+          const now = new Date();
+          const month = now.getFullYear() === data.year ? now.getMonth() : 0;
+          data.contributions.push({
+            id: `saving-${Date.now()}`,
+            month,
+            label: 'New Savings Contribution',
+            planned: 0,
+            actual: null,
+            bonus: false
+          });
+        } else if (button.id === 'addSavingsGoalBtn') {
+          const largestTarget = data.goals.reduce((max, goal) => Math.max(max, Number(goal.target) || 0), 0);
+          const goal = {
+            id: `goal-${Date.now()}`,
+            name: `Goal ${data.goals.length + 1}`,
+            target: Math.max(5000, Math.ceil((largestTarget + 5000) / 5000) * 5000),
+            targetDate: `${data.year}-12-31`
+          };
+          data.goals.push(goal);
+          data.activeGoalId = goal.id;
+        } else if (button.dataset.savingsGoalAction) {
+          const goalId = button.closest('[data-goal-id]')?.dataset.goalId;
+          if (!goalId) return;
+          if (button.dataset.savingsGoalAction === 'activate') data.activeGoalId = goalId;
+          if (button.dataset.savingsGoalAction === 'remove') {
+            if (data.goals.length <= 1 || !window.confirm('Remove this savings goal? Contributions and totals will stay intact.')) return;
+            data.goals = data.goals.filter(goal => goal.id !== goalId);
+            if (data.activeGoalId === goalId) data.activeGoalId = data.goals[0].id;
+          }
+        } else if (button.dataset.savingsAction === 'remove') {
+          const itemId = button.closest('[data-saving-id]')?.dataset.savingId;
+          if (!itemId || !window.confirm('Remove this planned contribution?')) return;
+          data.contributions = data.contributions.filter(item => item.id !== itemId);
+        } else return;
+
+        state.savingsForecast = SavingsForecast.normalizeState(data, data.year);
+        persistSavingsForecast();
+        renderSavingsForecast();
       });
 
       // Global actions

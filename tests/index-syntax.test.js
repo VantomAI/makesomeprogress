@@ -14,5 +14,24 @@ test('every inline script in index.html parses', () => {
 test('the scheduling and design assets are loaded', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   assert.match(html, /<script src="bill-scheduler\.js"><\/script>/);
+  assert.match(html, /<script src="savings-forecast\.js"><\/script>/);
   assert.match(html, /<link rel="stylesheet" href="design-system\.css"\/>/);
+});
+
+test('settings includes expandable release notes for recent releases', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(html, /id="patchNotesList"/);
+  assert.match(html, /version: 'v0\.36'/);
+  assert.match(html, /version: 'v0\.35'/);
+  assert.match(html, /version: 'v0\.34'/);
+  assert.match(html, /function renderPatchNotes\(\)/);
+});
+
+test('savings forecast tab is wired to shared state and rendering', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(html, /data-tab="savings-forecast-tab"/);
+  assert.match(html, /id="savings-forecast-tab"/);
+  assert.match(html, /savingsForecast: SavingsForecast\.createDefaultState\(2026\)/);
+  assert.match(html, /function renderSavingsForecast\(\)/);
+  assert.match(html, /addEventListener\('focusout'.*updateSavingsForecastFromControl/s);
 });

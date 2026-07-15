@@ -10,6 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="bill-scheduler.js"></script>
 
   <script>
     window.FORCE_MOBILE_VIEW = window.FORCE_MOBILE_VIEW === true;
@@ -350,6 +351,7 @@
     /* Ensure chart.js canvas is responsive */
     .chart-container canvas { max-width: 100% !important; }
   </style>
+  <link rel="stylesheet" href="design-system.css"/>
 </head>
 <body class="p-3 sm:p-6">
   <div class="container mx-auto max-w-7xl">
@@ -358,7 +360,7 @@
         <img src="assets/msp-logo.svg" alt="" class="w-10 h-10 rounded-xl shadow-lg shadow-emerald-500/20" aria-hidden="true">
         <div>
           <h1 class="text-xl sm:text-2xl font-bold text-white tracking-tight">Make Some Progress</h1>
-          <p class="text-xs text-slate-500 hidden sm:block">Financial Dashboard</p>
+          <p class="text-xs text-slate-500 hidden sm:block">Financial Dashboard <span class="ml-1 text-emerald-400/80">v0.34 &mdash; Scheduling Reliability</span></p>
         </div>
       </div>
       <div class="actions flex items-center gap-2 flex-wrap">
@@ -718,7 +720,7 @@
   <!-- Bill Edit Modal (for recurrence editing) -->
   <div id="billEditModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 backdrop-blur-sm p-4">
     <div class="modal-content p-6 w-full max-w-md">
-      <h2 class="text-xl font-semibold mb-4 text-white">Edit Recurring Bill</h2>
+      <h2 id="billEditModalTitle" class="text-xl font-semibold mb-4 text-white">Edit Recurring Expense</h2>
       <div id="billEditFields" class="space-y-4"></div>
       <div class="flex justify-end gap-2 mt-6">
         <button class="btn btn-secondary" onclick="hideBillEditModal()">Cancel</button>
@@ -980,56 +982,15 @@
     ];
 
     function getNextDueDate(firstDueDate, interval, afterDate = null) {
-      if (!firstDueDate || !interval) return null;
-      const first = new Date(firstDueDate + 'T00:00:00');
-      const ref = afterDate ? new Date(afterDate) : new Date();
-      ref.setHours(0, 0, 0, 0);
-
-      let candidate = new Date(first);
-      let iterations = 0;
-      const maxIter = 5000;
-
-      while (candidate < ref && iterations < maxIter) {
-        candidate = advanceDate(candidate, interval);
-        iterations++;
-      }
-      // candidate is now the first due date >= ref
-      return candidate;
+      return BillScheduler.getNextDueDate(firstDueDate, interval, afterDate || new Date());
     }
 
     function advanceDate(date, interval) {
-      const d = new Date(date);
-      switch (interval) {
-        case 'weekly': d.setDate(d.getDate() + 7); break;
-        case 'biweekly': d.setDate(d.getDate() + 14); break;
-        case 'monthly': d.setMonth(d.getMonth() + 1); break;
-        case 'bimonthly': d.setMonth(d.getMonth() + 2); break;
-        case 'quarterly': d.setMonth(d.getMonth() + 3); break;
-        case 'semiannual': d.setMonth(d.getMonth() + 6); break;
-        case 'annual': d.setFullYear(d.getFullYear() + 1); break;
-        default: d.setMonth(d.getMonth() + 1);
-      }
-      return d;
+      return BillScheduler.advanceDate(date, interval);
     }
 
     function getCycleDateForPayment(firstDueDate, interval, paymentDate) {
-      if (!firstDueDate || !interval) return null;
-      const first = new Date(firstDueDate + 'T00:00:00');
-      const pay = new Date(paymentDate + 'T00:00:00');
-
-      let prev = new Date(first);
-      let current = new Date(first);
-      let iterations = 0;
-
-      while (current <= pay && iterations < 5000) {
-        prev = new Date(current);
-        current = advanceDate(current, interval);
-        iterations++;
-      }
-      // prev is the cycle due date that this payment likely covers
-      // If the payment is before the first due date, it covers the first cycle
-      if (pay < first) return first;
-      return prev;
+      return BillScheduler.getOccurrenceOnOrBefore(firstDueDate, interval, paymentDate);
     }
 
     function getBillStatus(bill) {
@@ -1056,7 +1017,8 @@
         const cycleDate = getCycleDateForPayment(bill.firstDueDate, bill.recurrenceInterval, bill.lastPaidDate);
         if (cycleDate && cycleDate.getTime() >= nextDue.getTime() - (1000 * 60 * 60 * 24)) {
           // This cycle is paid, show next
-          const afterNext = advanceDate(nextDue, bill.recurrenceInterval);
+          const followingDay = new Date(nextDue); followingDay.setDate(followingDay.getDate() + 1);
+          const afterNext = getNextDueDate(bill.firstDueDate, bill.recurrenceInterval, followingDay);
           const nextDiff = Math.ceil((afterNext - today) / (1000 * 60 * 60 * 24));
           return { status: 'paid', text: 'Paid', nextDue: afterNext };
         }
@@ -3111,6 +3073,7 @@
       const bill = findRecurringBill(action.matchName || action.name);
       if (!bill) throw new Error('Could not find that recurring expense.');
       if (bill.gcalEventId) deleteGcalEvent(bill.gcalEventId);
+      removeScheduledExpenseFromOpenLogs('recurring', bill.id, bill.name);
       state.checkTracker.bills = state.checkTracker.bills.filter(b => b !== bill);
       return `Removed recurring ${bill.name}.`;
     }
@@ -3134,6 +3097,7 @@
         category: action.category ? migrateCategory(action.category) : autoCategorizeOneTime(name)
       };
       state.checkTracker.oneTimeExpenses.push(exp);
+      syncOneTimeExpenseIntoOpenLogs(exp);
       return `Added one-time ${name} for ${formatCurrency(amount)}.`;
     }
 
@@ -3145,12 +3109,14 @@
       if (action.amount !== undefined) exp.amount = Math.max(0, Number(action.amount) || 0);
       if (action.date || action.dueDate) exp.date = resolveAgentDate(action.date || action.dueDate) || exp.date;
       if (action.category) exp.category = migrateCategory(action.category);
+      syncOneTimeExpenseIntoOpenLogs(exp, oldName);
       return `Updated one-time ${oldName}.`;
     }
 
     function deleteOneTimeExpenseFromAgent(action) {
       const exp = findOneTimeExpense(action.matchName || action.name);
       if (!exp) throw new Error('Could not find that one-time expense.');
+      removeScheduledExpenseFromOpenLogs('one-time', exp.id, exp.name);
       state.checkTracker.oneTimeExpenses = state.checkTracker.oneTimeExpenses.filter(e => e !== exp);
       return `Removed one-time ${exp.name}.`;
     }
@@ -3168,9 +3134,11 @@
       const found = findExpenseTabExpense(action);
       if (!found) throw new Error('Could not find that expense in the Expenses tab.');
       if (found.kind === 'recurring') {
+        removeScheduledExpenseFromOpenLogs('recurring', found.item.id, found.item.name);
         state.checkTracker.bills = state.checkTracker.bills.filter(b => b !== found.item);
         return `Removed recurring ${found.item.name}.`;
       }
+      removeScheduledExpenseFromOpenLogs('one-time', found.item.id, found.item.name);
       state.checkTracker.oneTimeExpenses = state.checkTracker.oneTimeExpenses.filter(e => e !== found.item);
       return `Removed one-time ${found.item.name}.`;
     }
@@ -3204,64 +3172,90 @@
       return `Removed dashboard tile "${tile.data?.title || 'Untitled'}".`;
     }
 
-    function getBillDueForLog(bill, log) {
-      if (!log?.startDate || !log?.endDate) return null;
-      const logStart = new Date(log.startDate + 'T00:00:00');
-      return bill.firstDueDate && bill.recurrenceInterval
-        ? getNextDueDate(bill.firstDueDate, bill.recurrenceInterval, logStart)
-        : dateForDueDayInMonth(bill.dueDay || 1, logStart.getFullYear(), logStart.getMonth());
+    function getBillDuesForLog(bill, log) {
+      if (!log?.startDate || !log?.endDate) return [];
+      if (bill.firstDueDate && bill.recurrenceInterval) {
+        return BillScheduler.getOccurrencesInRange(bill.firstDueDate, bill.recurrenceInterval, log.startDate, log.endDate);
+      }
+      const dates = [];
+      const start = new Date(log.startDate + 'T00:00:00');
+      const end = new Date(log.endDate + 'T00:00:00');
+      let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+      while (cursor <= end) {
+        const due = dateForDueDayInMonth(bill.dueDay || 1, cursor.getFullYear(), cursor.getMonth());
+        if (due >= start && due <= end) dates.push(due);
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+      return dates;
+    }
+
+    function reconcileRecurringBillInLog(bill, log, previousName = null) {
+      return BillScheduler.reconcileScheduledItems(log, {
+        sourceType: 'recurring', sourceId: bill.id, name: bill.name,
+        previousNames: previousName ? [previousName] : [],
+        amount: bill.amount, category: bill.category || 'Other',
+        dates: getBillDuesForLog(bill, log)
+      });
     }
 
     function syncRecurringBillIntoOpenLogs(bill, previousName = null) {
       const todayStr = formatDateYMD(new Date());
-      const matchName = previousName || bill.name;
+      let modified = false;
       (state.checkTracker.checkLogs || []).forEach(log => {
-        if (!log.startDate || !log.endDate) return;
-        const due = getBillDueForLog(bill, log);
-        if (!due) return;
-        const dueStr = formatDateYMD(due);
-        const belongsInLog = dueStr >= log.startDate && dueStr <= log.endDate;
-        const canMoveScheduledItems = previousName !== null && log.endDate >= todayStr;
-        const matchesBill = item => textMatches(item.bill, matchName) || textMatches(item.bill, bill.name);
+        if (!log.startDate || !log.endDate || log.endDate < todayStr) return;
+        if (reconcileRecurringBillInLog(bill, log, previousName)) modified = true;
+      });
+      return modified;
+    }
 
-        if (!belongsInLog) {
-          if (canMoveScheduledItems) log.items = log.items.filter(item => item.paid || !matchesBill(item));
-          return;
-        }
+    function reconcileOneTimeExpenseInLog(expense, log, previousName = null) {
+      const belongsInLog = !!expense.date && expense.date >= log.startDate && expense.date <= log.endDate;
+      return BillScheduler.reconcileScheduledItems(log, {
+        sourceType: 'one-time', sourceId: expense.id, name: expense.name,
+        previousNames: previousName ? [previousName] : [],
+        amount: expense.amount, category: expense.category || 'Other',
+        dates: belongsInLog ? [expense.date] : []
+      });
+    }
 
-        let scheduledItem = log.items.find(item => matchesBill(item) && item.dueDate === dueStr);
-        if (!scheduledItem && canMoveScheduledItems) scheduledItem = log.items.find(item => matchesBill(item) && !item.paid);
+    function syncOneTimeExpenseIntoOpenLogs(expense, previousName = null) {
+      const todayStr = formatDateYMD(new Date());
+      let modified = false;
+      (state.checkTracker.checkLogs || []).forEach(log => {
+        if (!log.startDate || !log.endDate || log.endDate < todayStr) return;
+        if (reconcileOneTimeExpenseInLog(expense, log, previousName)) modified = true;
+      });
+      return modified;
+    }
 
-        if (scheduledItem) {
-          scheduledItem.bill = bill.name;
-          scheduledItem.cost = bill.amount;
-          scheduledItem.category = bill.category || scheduledItem.category || 'Other';
-          scheduledItem.dueDate = dueStr;
-          let kept = false;
-          log.items = log.items.filter(item => {
-            if (!matchesBill(item) || item.paid) return true;
-            if (item === scheduledItem && !kept) { kept = true; return true; }
-            return false;
-          });
-          return;
-        }
-
-        const newItemId = log.items.length > 0 ? Math.max(...log.items.map(i => i.id || 0)) + 1 : 1;
-        log.items.push({ id: newItemId, bill: bill.name, cost: bill.amount, category: bill.category || 'Other', dueDate: dueStr, paid: false });
+    function removeScheduledExpenseFromOpenLogs(sourceType, sourceId, name) {
+      const todayStr = formatDateYMD(new Date());
+      const normalizedName = String(name || '').toLowerCase().trim();
+      (state.checkTracker.checkLogs || []).forEach(log => {
+        if (!log.endDate || log.endDate < todayStr) return;
+        log.items = (log.items || []).filter(item => {
+          if (item.paid) return true;
+          if (item.scheduleSourceType) return !(item.scheduleSourceType === sourceType && String(item.scheduleSourceId) === String(sourceId));
+          return String(item.bill || '').toLowerCase().trim() !== normalizedName;
+        });
       });
     }
 
     function syncBillsIntoCheckLog(log) {
-      (state.checkTracker.bills || []).forEach(bill => {
-        const due = getBillDueForLog(bill, log);
-        if (!due) return;
-        const dueStr = formatDateYMD(due);
-        if (dueStr < log.startDate || dueStr > log.endDate) return;
-        const exists = log.items.some(item => textMatches(item.bill, bill.name) && item.dueDate === dueStr);
-        if (exists) return;
-        const newItemId = log.items.length > 0 ? Math.max(...log.items.map(i => i.id || 0)) + 1 : 1;
-        log.items.push({ id: newItemId, bill: bill.name, cost: bill.amount, category: bill.category || 'Other', dueDate: dueStr, paid: false });
+      let modified = false;
+      (state.checkTracker.bills || []).forEach(bill => { if (reconcileRecurringBillInLog(bill, log)) modified = true; });
+      (state.checkTracker.oneTimeExpenses || []).forEach(expense => { if (reconcileOneTimeExpenseInLog(expense, log)) modified = true; });
+      return modified;
+    }
+
+    function reconcileOpenCheckLogs() {
+      const todayStr = formatDateYMD(new Date());
+      let modified = false;
+      (state.checkTracker.checkLogs || []).forEach(log => {
+        if (!log.startDate || !log.endDate || log.endDate < todayStr) return;
+        if (syncBillsIntoCheckLog(log)) modified = true;
       });
+      return modified;
     }
 
     function applySemanticTileUpdate(tile, action) {
@@ -3615,15 +3609,10 @@
 
     function firstDueDateForDueDay(day, currentFirstDueDate = '') {
       const dueDay = normalizeDueDay(day, dayFromDate(currentFirstDueDate) || 1);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
       const current = normalizeDateString(currentFirstDueDate)
         ? new Date(currentFirstDueDate + 'T00:00:00')
-        : today;
-      let candidate = dateForDueDayInMonth(dueDay, current.getFullYear(), current.getMonth());
-      while (candidate < today) {
-        candidate = dateForDueDayInMonth(dueDay, candidate.getFullYear(), candidate.getMonth() + 1);
-      }
+        : new Date();
+      const candidate = dateForDueDayInMonth(dueDay, current.getFullYear(), current.getMonth());
       return formatDateYMD(candidate);
     }
 
@@ -3890,6 +3879,7 @@
         if (data?.data) {
           state = data.data;
           state.checkTracker.bills.forEach(bill => { bill.category = migrateCategory(bill.category); });
+          reconcileOpenCheckLogs();
           saveState(); renderAll();
           window.showToast(isAutoSync ? 'Data synced from cloud.' : 'Data refreshed successfully.', 'success');
         } else if (!isAutoSync) { alert('No data found in cloud.'); }
@@ -4256,6 +4246,7 @@
       const bill = state.checkTracker.bills.find(b => b.id === billId);
       if (!bill) return;
       const modal = document.getElementById('billEditModal');
+      document.getElementById('billEditModalTitle').textContent = bill.name === 'New Bill' ? 'New Recurring Expense' : 'Edit Recurring Expense';
       const fields = document.getElementById('billEditFields');
 
       fields.innerHTML = `
@@ -4305,11 +4296,13 @@
       if (editingOneTimeId !== null) {
         const exp = (state.checkTracker.oneTimeExpenses || []).find(e => e.id === editingOneTimeId);
         if (exp) {
+          const oldName = exp.name;
           exp.name = document.getElementById('billEditName').value || 'New Expense';
           exp.amount = parseFloat(document.getElementById('billEditAmount').value) || 0;
           exp.category = document.getElementById('billEditCategory').value;
           exp.date = document.getElementById('billEditFirstDueDate').value || '';
-          saveState(); renderOneTimeExpenses(); renderAnalytics(); hideBillEditModal();
+          syncOneTimeExpenseIntoOpenLogs(exp, oldName);
+          saveState(); saveDataToCloud(); renderOneTimeExpenses(); renderCheckLogs(); renderAnalytics(); hideBillEditModal();
           editingOneTimeId = null;
         }
         return;
@@ -4378,7 +4371,7 @@
       // Update GCal event if one exists for this bill
       if (bill.gcalEventId && getGoogleCalToken()) updateGcalEvent(bill);
 
-      saveState(); saveDataToCloud(); renderBills(); renderOneTimeExpenses(); renderCalendar(); renderAnalytics(); hideBillEditModal();
+      saveState(); saveDataToCloud(); renderBills(); renderOneTimeExpenses(); renderCheckLogs(); renderCalendar(); renderAnalytics(); hideBillEditModal();
     }
 
     function addBill() {
@@ -4399,8 +4392,9 @@
       showConfirmModal('Remove Bill', 'Are you sure you want to remove this recurring bill?', async () => {
         const bill = state.checkTracker.bills.find(b => b.id === id);
         if (bill?.gcalEventId) deleteGcalEvent(bill.gcalEventId);
+        if (bill) removeScheduledExpenseFromOpenLogs('recurring', bill.id, bill.name);
         state.checkTracker.bills = state.checkTracker.bills.filter(b => b.id !== id);
-        saveState(); saveDataToCloud(); renderBills(); renderCalendar();
+        saveState(); saveDataToCloud(); renderBills(); renderCheckLogs(); renderCalendar();
       });
     }
 
@@ -4470,7 +4464,7 @@
       const fromLogs = [];
       state.checkTracker.checkLogs.forEach(log => {
         log.items.forEach(item => {
-          if (!recurringNames.has((item.bill || '').toLowerCase().trim()) && item.paid) {
+          if (!recurringNames.has((item.bill || '').toLowerCase().trim()) && item.paid && item.scheduleSourceType !== 'one-time') {
             fromLogs.push({
               id: `check${log.id}-item${item.id}`,
               name: item.bill || 'Unnamed',
@@ -4536,7 +4530,10 @@
               ${exp.date ? `<span>${formatDateForDisplay(exp.date)}</span>` : ''}
             </div>
           </div>
-          ${isManual ? `<button class="btn btn-danger btn-xs remove-onetime-btn" data-id="${exp.id}">Remove</button>` : ''}
+          ${isManual ? `<div class="flex items-center gap-2 flex-shrink-0">
+            <button class="btn btn-secondary btn-xs edit-onetime-btn" data-id="${exp.id}">Edit</button>
+            <button class="btn btn-danger btn-xs remove-onetime-btn" data-id="${exp.id}">Remove</button>
+          </div>` : ''}
         `;
         container.appendChild(card);
       });
@@ -4550,7 +4547,8 @@
           const manualExp = (state.checkTracker.oneTimeExpenses || []).find(ex => String(ex.id) === key);
           if (manualExp) {
             manualExp.category = newCat;
-            saveState(); saveDataToCloud(); renderAnalytics();
+            syncOneTimeExpenseIntoOpenLogs(manualExp, manualExp.name);
+            saveState(); saveDataToCloud(); renderCheckLogs(); renderAnalytics();
           } else {
             // For checklog items, save as override
             saveOneTimeCategoryOverride(key, newCat);
@@ -4569,8 +4567,10 @@
     }
 
     function removeOneTimeExpense(id) {
+      const expense = (state.checkTracker.oneTimeExpenses || []).find(e => e.id === id);
+      if (expense) removeScheduledExpenseFromOpenLogs('one-time', expense.id, expense.name);
       state.checkTracker.oneTimeExpenses = (state.checkTracker.oneTimeExpenses || []).filter(e => e.id !== id);
-      saveState(); renderOneTimeExpenses();
+      saveState(); saveDataToCloud(); renderOneTimeExpenses(); renderCheckLogs();
     }
 
     let editingOneTimeId = null;
@@ -4580,6 +4580,7 @@
       const exp = (state.checkTracker.oneTimeExpenses || []).find(e => e.id === expId);
       if (!exp) return;
       const modal = document.getElementById('billEditModal');
+      document.getElementById('billEditModalTitle').textContent = exp.name === 'New Expense' ? 'New One-Time Expense' : 'Edit One-Time Expense';
       const fields = document.getElementById('billEditFields');
       fields.innerHTML = `
         <div><label class="text-xs font-medium text-slate-400 mb-1 block">Expense Name</label><input type="text" id="billEditName" value="${exp.name}"></div>
@@ -4618,18 +4619,18 @@
         const actualBalance = (Number(log.checkAmount) || 0) - totalPaid;
 
         const card = document.createElement('div');
-        card.className = 'card p-5';
+        card.className = 'card check-log-card p-5';
         card.dataset.logId = log.id;
 
         let itemsHtml = log.items.map(item => `
           <tr class="${item.paid ? 'text-slate-500' : ''} border-b border-slate-800 list-item-draggable" data-item-id="${item.id}" draggable="true">
-            <td class="p-2"><input type="checkbox" class="item-paid" ${item.paid ? 'checked' : ''}></td>
-            <td class="p-2"><input type="text" class="item-input text-xs" data-prop="bill" value="${item.bill}"></td>
-            <td class="p-2"><input type="number" class="item-input text-xs w-20" data-prop="cost" value="${item.cost}" step="0.01"></td>
-            <td class="p-2 hidden sm:table-cell"><input type="date" class="item-input text-xs" data-prop="dueDate" value="${item.dueDate}"></td>
-            <td class="p-2 running-total text-right text-xs hidden sm:table-cell"></td>
-            <td class="p-2 running-balance text-right text-xs hidden sm:table-cell"></td>
-            <td class="p-2"><button class="btn btn-danger btn-xs remove-item-btn">X</button></td>
+            <td class="p-2" data-label="Paid"><input type="checkbox" class="item-paid" aria-label="Mark ${item.bill} paid" ${item.paid ? 'checked' : ''}></td>
+            <td class="p-2" data-label="Bill"><input type="text" class="item-input text-xs" data-prop="bill" value="${item.bill}"></td>
+            <td class="p-2" data-label="Cost"><input type="number" class="item-input text-xs w-20" data-prop="cost" value="${item.cost}" step="0.01"></td>
+            <td class="p-2 check-due-cell" data-label="Due date"><input type="date" class="item-input text-xs" data-prop="dueDate" value="${item.dueDate}"></td>
+            <td class="p-2 running-total text-right text-xs hidden sm:table-cell" data-label="Paid total"></td>
+            <td class="p-2 running-balance text-right text-xs hidden sm:table-cell" data-label="Balance"></td>
+            <td class="p-2 check-row-action"><button class="btn btn-danger btn-xs remove-item-btn" aria-label="Remove ${item.bill}">Remove</button></td>
           </tr>
         `).join('');
 
@@ -4654,19 +4655,23 @@
                 </select>
               </div>
             </div>
-            <button class="btn btn-danger btn-sm delete-log-btn">Delete Log</button>
+            <div class="flex items-center gap-2">
+              <button class="btn btn-secondary btn-sm sync-log-btn">Sync Expenses</button>
+              <button class="btn btn-danger btn-sm delete-log-btn">Delete Log</button>
+            </div>
           </div>
           <div class="mb-4 max-w-xs">
             <label class="text-xs text-slate-500 mb-1 block">Check Amount:</label>
             <input type="number" class="check-amount-input text-sm" value="${log.checkAmount || ''}">
           </div>
           <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead><tr class="border-b border-slate-700 text-slate-500 text-xs"><th class="p-2 text-left">Paid</th><th class="p-2 text-left">Bill</th><th class="p-2 text-left">Cost</th><th class="p-2 text-left hidden sm:table-cell">Due Date</th><th class="p-2 text-right hidden sm:table-cell">Paid Total</th><th class="p-2 text-right hidden sm:table-cell">Balance</th><th></th></tr></thead>
+            <table class="w-full text-sm check-log-table">
+              <thead><tr class="border-b border-slate-700 text-slate-500 text-xs"><th class="p-2 text-left">Paid</th><th class="p-2 text-left">Bill</th><th class="p-2 text-left">Cost</th><th class="p-2 text-left">Due Date</th><th class="p-2 text-right hidden sm:table-cell">Paid Total</th><th class="p-2 text-right hidden sm:table-cell">Balance</th><th></th></tr></thead>
               <tbody>${itemsHtml}</tbody>
             </table>
           </div>
           <div class="mt-3"><button class="btn btn-secondary btn-sm add-item-btn">+ Add One-Time Bill</button></div>
+          <p class="schedule-assurance"><span aria-hidden="true">&#10003;</span> Recurring and one-time expenses due from ${formatDateForDisplay(log.startDate)} through ${formatDateForDisplay(log.endDate)} are included automatically.</p>
           ${renderBankReviewForLog(log)}
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-700/50">
             <div class="stat-card"><p class="text-xs text-slate-500">Projected</p><p class="font-semibold text-sm projected-spending">${formatCurrency(projectedSpending)}</p></div>
@@ -4754,6 +4759,10 @@
 
       if (target.classList.contains('bank-sync-log-btn')) {
         syncBankTransactions(false);
+      } else if (target.classList.contains('sync-log-btn')) {
+        syncBillsIntoCheckLog(log);
+        saveState(); saveDataToCloud(); renderCheckLogs();
+        window.showToast(`Expenses synced for ${log.name}.`, 'success');
       } else if (target.classList.contains('bank-apply-log-btn')) {
         const selectedIds = Array.from(logCard.querySelectorAll('.bank-review-select:checked')).map(input => input.dataset.txId);
         applyBankSuggestionsToLog(log, selectedIds);
@@ -4821,7 +4830,8 @@
       if (diffDays < -3) { timingText = `Early (${Math.abs(diffDays)} days before due)`; timingClass = 'text-emerald-400'; }
       else if (diffDays <= 3) { timingText = 'On-time'; timingClass = 'text-emerald-400'; }
       else { timingText = `Late (${diffDays} days after due)`; timingClass = 'text-red-400'; }
-      const nextDue = advanceDate(cycleDate, bill.recurrenceInterval);
+      const followingDay = new Date(cycleDate); followingDay.setDate(followingDay.getDate() + 1);
+      const nextDue = getNextDueDate(bill.firstDueDate, bill.recurrenceInterval, followingDay);
       const content = document.getElementById('paymentInfoContent');
       content.innerHTML = `
         <div class="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
@@ -5655,6 +5665,7 @@
     function runStartupChecks() {
       let modified = false;
       Object.values(state.dashboard.tiles).forEach(tile => { if (tile.template === 'checklist' && checkAndApplyRecurrence(tile)) modified = true; });
+      if (reconcileOpenCheckLogs()) modified = true;
       if (modified) saveState();
     }
 

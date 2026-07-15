@@ -1,0 +1,8 @@
+{
+  "name": "make-some-progress",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check bill-scheduler.js && node --test"
+  }
+}

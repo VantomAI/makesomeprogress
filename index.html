@@ -352,7 +352,22 @@
     /* Ensure chart.js canvas is responsive */
     .chart-container canvas { max-width: 100% !important; }
   </style>
-  <link rel="stylesheet" href="design-system.css"/>
+  <link rel="stylesheet" href="design-system.css?v=0.37.1"/>
+  <style id="workspace-shell-critical">
+    /* Keep navigation structure intact even if a browser temporarily holds an older stylesheet. */
+    @media (min-width: 1101px) {
+      .app-shell { display: grid !important; grid-template-columns: 224px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 1.25rem 1.4rem; }
+      .app-header { grid-column: 1 / -1; }
+      .app-nav { grid-column: 1; grid-row: 2; display: flex !important; flex-direction: column !important; align-self: start; }
+      .app-nav-heading { display: flex !important; flex-direction: column; }
+      .app-nav-footer { display: grid !important; }
+      .app-main { grid-column: 2; grid-row: 2; min-width: 0; }
+    }
+    @media (max-width: 1100px) {
+      .app-nav-heading,
+      .app-nav-footer { display: none !important; }
+    }
+  </style>
 </head>
 <body class="p-3 sm:p-6">
   <div class="container app-shell mx-auto max-w-7xl">
@@ -361,7 +376,7 @@
         <img src="assets/msp-logo.svg" alt="" class="w-10 h-10 rounded-xl shadow-lg shadow-emerald-500/20" aria-hidden="true">
         <div>
           <h1 class="text-xl sm:text-2xl font-bold text-white tracking-tight">Make Some Progress</h1>
-          <p class="app-subtitle text-xs text-slate-500 hidden sm:block">Financial Dashboard <span class="ml-1 text-emerald-400/80">v0.37 &mdash; Refined Workspace</span></p>
+          <p class="app-subtitle text-xs text-slate-500 hidden sm:block">Financial Dashboard <span class="ml-1 text-emerald-400/80">v0.37.1 &mdash; Design Delivery Fix</span></p>
         </div>
       </div>
       <div class="actions app-actions flex items-center gap-2 flex-wrap">
@@ -379,7 +394,7 @@
     </header>
 
     <div class="tabs app-nav" aria-label="Primary workspace navigation">
-      <div class="app-nav-heading"><span>Workspace</span><small>Plan · track · progress</small></div>
+      <div class="app-nav-heading hidden"><span>Workspace</span><small>Plan · track · progress</small></div>
       <button class="tab-btn active" data-tab="dashboard-tab" data-nav-icon="⌂">Dashboard</button>
       <button class="tab-btn" data-tab="check-logs-tab" data-nav-icon="✓">Check Logs</button>
       <button class="tab-btn" data-tab="bills-tab" data-nav-icon="$">Expenses</button>
@@ -389,7 +404,7 @@
       <button class="tab-btn" data-tab="search-tab" data-nav-icon="◷">Expense History</button>
       <button class="tab-btn" data-tab="mobile-budget-tab" data-nav-icon="▯">Mobile Budget</button>
       <button class="tab-btn" data-tab="ai-agent-tab" data-nav-icon="✦">AI Workspace</button>
-      <div class="app-nav-footer"><span>v0.37</span><small>Refined workspace</small></div>
+      <div class="app-nav-footer hidden"><span>v0.37.1</span><small>Design delivery fix</small></div>
     </div>
 
     <div id="tab-contents" class="app-main">
@@ -967,7 +982,7 @@
         <div id="patchNotesSection">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
             <h3 class="text-sm font-semibold text-slate-300">Patch Notes</h3>
-            <span class="release-current-badge">Current: v0.37</span>
+            <span class="release-current-badge">Current: v0.37.1</span>
           </div>
           <p class="text-xs text-slate-500 mb-3">Open a release to review its improvements, fixes, and quality updates.</p>
           <div id="patchNotesList" class="patch-notes-list"></div>
@@ -989,6 +1004,22 @@
     const LLM_CHAT_HISTORY_LIMIT = 100;
     const AI_LOG_KEY = 'make-some-progress-ai-logs-v1';
     const RELEASE_NOTES = [
+      {
+        version: 'v0.37.1',
+        title: 'Design Delivery Fix',
+        date: 'July 15, 2026',
+        summary: 'Ensures the v0.37 application shell and its stylesheet always deploy and load as one matching release.',
+        sections: [
+          {
+            title: 'Navigation repair',
+            items: [
+              'Versioned the design stylesheet URL so browsers cannot reuse the pre-v0.37 file with the new navigation markup.',
+              'Added safe fallback visibility rules so workspace labels never spill into the horizontal navigation.',
+              'Embedded the essential desktop shell layout in the page to protect the navigation structure during future cache transitions.'
+            ]
+          }
+        ]
+      },
       {
         version: 'v0.37',
         title: 'Refined Workspace',

@@ -1398,3 +1398,77 @@ textarea:focus-visible,
 @media (max-width: 350px) {
   .savings-kpi-grid { grid-template-columns: 1fr; }
 }
+
+/* v0.37.2 — Compact desktop Check Logs */
+@media (min-width: 721px) {
+  #checkLogHistory > * + * { margin-top: 0.75rem !important; }
+
+  .check-log-card { padding: 0.9rem 1rem !important; }
+  .check-log-header { margin-bottom: 0.55rem !important; gap: 0.65rem 1rem; }
+  .check-log-header h3 { font-size: 0.82rem; line-height: 1.25; }
+  .check-log-header h3 span { font-size: 0.62rem; }
+  .check-log-identity { min-width: 13rem; }
+  .check-log-identity > div { margin-top: 0.3rem !important; gap: 0.4rem; }
+  .check-log-identity > div label { font-size: 0.6rem; }
+
+  .check-log-tools { margin-left: auto; }
+  .check-log-amount { display: block; width: 8.5rem; font-size: 0.6rem; }
+  .check-log-amount .check-amount-input {
+    min-height: 2rem;
+    margin-top: 0.22rem !important;
+    padding: 0.28rem 0.5rem;
+    font-size: 0.72rem;
+  }
+
+  .check-log-actions .btn { min-height: 2rem; padding: 0.35rem 0.62rem; font-size: 0.64rem; }
+  .check-log-card .log-sort-select,
+  .check-log-card .log-order-select {
+    min-height: 1.75rem;
+    padding: 0.2rem 1.4rem 0.2rem 0.42rem;
+    border-radius: 0.5rem;
+    font-size: 0.64rem;
+  }
+
+  .check-log-table thead th {
+    padding: 0.32rem 0.42rem !important;
+    font-size: 0.57rem;
+    line-height: 1.1;
+  }
+
+  .check-log-table tbody td { padding: 0.22rem 0.42rem !important; }
+  .check-log-table .item-input {
+    min-height: 1.9rem;
+    padding: 0.28rem 0.45rem;
+    border-radius: 0.52rem;
+    font-size: 0.67rem;
+  }
+  .check-log-table input[type='checkbox'] { width: 0.95rem; height: 0.95rem; }
+  .check-log-table .running-total,
+  .check-log-table .running-balance { font-size: 0.65rem; }
+  .check-log-table .remove-item-btn { min-height: 1.85rem; padding: 0.28rem 0.5rem; font-size: 0.59rem; }
+
+  .check-log-add { margin-top: 0.45rem !important; }
+  .check-log-add .btn { min-height: 1.95rem; padding: 0.32rem 0.6rem; font-size: 0.62rem; }
+
+  .check-log-card .schedule-assurance {
+    margin-top: 0.5rem;
+    padding: 0.42rem 0.6rem;
+    border-radius: 0.62rem;
+    font-size: 0.62rem;
+    line-height: 1.35;
+  }
+  .check-log-card .schedule-assurance span { width: 0.95rem; height: 0.95rem; font-size: 0.58rem; }
+
+  .check-log-bank-notice {
+    margin-top: 0.5rem !important;
+    padding: 0.5rem 0.65rem !important;
+    border-radius: 0.62rem !important;
+    font-size: 0.62rem !important;
+    line-height: 1.35;
+  }
+
+  .check-log-summary { margin-top: 0.65rem !important; padding-top: 0.65rem !important; }
+  .check-log-summary .stat-card { padding: 0.58rem 0.72rem; border-radius: 0.72rem; }
+  .check-log-summary .stat-card p:first-child { font-size: 0.58rem; }
+  .check-log-summary .stat-card p:last-child { margin-top: 0.1rem; font-size: 0.72rem; }
+}

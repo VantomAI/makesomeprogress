@@ -15,12 +15,13 @@ test('the scheduling and design assets are loaded', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   assert.match(html, /<script src="bill-scheduler\.js"><\/script>/);
   assert.match(html, /<script src="savings-forecast\.js"><\/script>/);
-  assert.match(html, /<link rel="stylesheet" href="design-system\.css\?v=0\.37\.1"\/>/);
+  assert.match(html, /<link rel="stylesheet" href="design-system\.css\?v=0\.37\.2"\/>/);
 });
 
 test('settings includes expandable release notes for recent releases', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   assert.match(html, /id="patchNotesList"/);
+  assert.match(html, /version: 'v0\.37\.2'/);
   assert.match(html, /version: 'v0\.37\.1'/);
   assert.match(html, /version: 'v0\.37'/);
   assert.match(html, /version: 'v0\.36'/);
@@ -35,7 +36,15 @@ test('the refined workspace shell and navigation are present', () => {
   assert.match(html, /class="tabs app-nav"/);
   assert.match(html, /class="app-nav-heading hidden"/);
   assert.match(html, /id="workspace-shell-critical"/);
-  assert.match(html, /v0\.37\.1 &mdash; Design Delivery Fix/);
+  assert.match(html, /v0\.37\.2 &mdash; Compact Check Logs/);
+});
+
+test('check log cards use the compact desktop structure', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(html, /class="check-log-header/);
+  assert.match(html, /class="check-log-tools/);
+  assert.match(html, /class="check-log-amount/);
+  assert.match(html, /class="check-log-summary/);
 });
 
 test('savings forecast tab is wired to shared state and rendering', () => {

@@ -3,6 +3,6 @@
   "private": true,
   "scripts": {
     "test": "node --test",
-    "check": "node --check bill-scheduler.js && node --test"
+    "check": "node --check bill-scheduler.js && node --check savings-forecast.js && node --test"
   }
 }
